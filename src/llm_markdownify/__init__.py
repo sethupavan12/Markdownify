@@ -8,7 +8,7 @@ __all__ = [
     "convert",
 ]
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 
 from .config import MarkdownifyConfig  # noqa: E402
 from .markdownifier import Markdownifier  # noqa: E402
