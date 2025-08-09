@@ -2,7 +2,7 @@
 
 Mardownify is a super easy-to-use PDF/image to high-quality Markdown converter using Vision LLMs. It supports text, images, signatures, tables, charts, flowcharts and preserves document structure (Headings, numbered lists etc).
 
-Tables become Markdown tables, charts become Mermaid diagrams, and images get concise summaries. Use as a CLI or Python library. Works with 100+ LLMs. Recommended to use with `gpt-5-mini` or `gpt-4.1-mini` or even better models for better performance. 
+Tables become Markdown tables, charts become Mermaid diagrams, and images get concise summaries. Use as a CLI or Python library. Works with 100+ LLMs. Recommended to use with `gpt-5-mini` or `gpt-4.1-mini` or even better models for better performance. The best part is you have complete control over what gets rendered how!
 
 If you don't believe it there's a whole gallery of examples with really wide range of OCR tasks you can explore here -> [Gallery](https://github.com/sethupavan12/Markdownify/blob/main/examples/gallery.md) 
 
