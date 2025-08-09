@@ -6,7 +6,7 @@ Tables become Markdown tables, charts become Mermaid diagrams, and images get co
 
 If you don't believe it there's a whole gallery of examples with really wide range of OCR tasks you can explore here -> [Gallery](https://github.com/sethupavan12/Markdownify/blob/main/examples/gallery.md) 
 
-<img width="2000" height="600" alt="image" src="https://github.com/user-attachments/assets/9a8b5176-03d8-4063-a8f3-4b1e52bdbe72" />
+<img width="1867" height="450" alt="image" src="https://github.com/user-attachments/assets/9a8b5176-03d8-4063-a8f3-4b1e52bdbe72" />
 
 ### Install
 ```bash
