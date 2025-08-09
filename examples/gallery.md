@@ -1,5 +1,5 @@
 ## OCR Gallery
-
+The following examples were generated using the default profile. However, you can create your own profile with specific instructions like what to avoid, image summary style, table rendering style, chart rendering styles etc
 - Total examples: 82
 
 | Image | Markdown |
