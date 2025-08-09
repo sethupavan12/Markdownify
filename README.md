@@ -4,15 +4,6 @@ Mardownify is a super easy-to-use PDF to high-quality Markdown converter using V
 
 Tables become Markdown tables, charts become Mermaid diagrams, and images get concise summaries. Use as a CLI or Python library. Works with 100+ LLMs. Recommended to use with `gpt-5-mini` or `gpt-4.1-mini` or even better models for better performance. 
 
-### Features
-- High-quality complex markdown generation powered by LLMs. 
-- Supports Text, Images, Tables, Charts.
-- Built-in prompts tuned for clean Markdown, Mermaid, and structured headings along with ability to customise.
-- Supports multi-page tables, charts and images.
-- High-fidelity page rendering from PDF.
-- Optional DOCX→PDF conversion using MS word installation.
-- Works seamlessly with 100+ LLMs with LiteLLM Intergration.
-
 ### Install
 ```bash
 uv pip install llm-markdownify
@@ -25,8 +16,17 @@ pip install llm-markdownify
 markdownify run input.pdf -o output.md --model gpt-5-mini
 ```
 
+### Features
+- High-quality complex markdown generation powered by LLMs. 
+- Supports Text, Images, Tables, Charts.
+- Built-in prompts tuned for clean Markdown, Mermaid, and structured headings along with ability to customise.
+- Supports multi-page tables, charts and images.
+- High-fidelity page rendering from PDF.
+- Optional DOCX→PDF conversion using MS word installation.
+- Works seamlessly with 100+ LLMs with LiteLLM Intergration.
+
 ### Python API (one-liner)
-```python
+```py
 from llm_markdownify import convert
 
 convert(
@@ -99,21 +99,6 @@ For additional providers and advanced configuration (fallbacks, cost tracking, s
 - `--max-group-pages`: Max pages to merge for continued content (default 3)
 - `--no-grouping`: Disable LLM-based grouping
 - `--temperature`, `--max-tokens`: LLM generation params
-
-### Dev tooling
-- Install pre-commit and enable the license header hook:
-  ```bash
-  pip install pre-commit
-  pre-commit install
-  # run on all files once
-  pre-commit run --all-files
-  ```
-  This inserts the header:
-  ```
-  # Copyright (c) 2025 Sethu Pavan Venkata Reddy Pastula
-  # Licensed under the Apache License, Version 2.0. See LICENSE file for details.
-  # SPDX-License-Identifier: Apache-2.0
-  ```
 
 ### Attribution & License
 This project uses the Apache 2.0 License, which includes an attribution/NOTICE requirement. If you distribute or use this project, please keep the `LICENSE` and `NOTICE` files intact, crediting the original author, Sethu Pavan Venkata Reddy Pastula.
