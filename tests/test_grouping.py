@@ -8,6 +8,7 @@ from dataclasses import dataclass
 
 
 from llm_markdownify.grouping import group_pages
+from llm_markdownify.prompt_profiles import load_prompt_profile
 
 
 @dataclass
@@ -19,7 +20,7 @@ class FakePage:
 def test_grouping_simple(monkeypatch):
     calls = []
 
-    def fake_assess(model, first_data_url, second_data_url):
+    def fake_assess(model, first_data_url, second_data_url, profile=None):
         calls.append((first_data_url, second_data_url))
         # pages 0->1 continue, 1->2 stop
         if second_data_url is None:
@@ -36,7 +37,10 @@ def test_grouping_simple(monkeypatch):
         FakePage(2, "data:c"),
     ]
 
-    groups = group_pages(pages, model="dummy", max_group_pages=3, enable_grouping=True)
+    profile = load_prompt_profile("contracts")
+    groups = group_pages(
+        pages, model="dummy", max_group_pages=3, enable_grouping=True, profile=profile
+    )
     assert len(groups) == 2
     assert [p.index for p in groups[0]] == [0, 1]
     assert [p.index for p in groups[1]] == [2]
@@ -48,5 +52,8 @@ def test_grouping_disabled():
         FakePage(1, "data:b"),
         FakePage(2, "data:c"),
     ]
-    groups = group_pages(pages, model="dummy", max_group_pages=2, enable_grouping=False)
+    profile = load_prompt_profile("contracts")
+    groups = group_pages(
+        pages, model="dummy", max_group_pages=2, enable_grouping=False, profile=profile
+    )
     assert len(groups) == 3

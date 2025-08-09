@@ -25,12 +25,14 @@ def run(
         None, help="LiteLLM model, e.g. gpt-4.1-mini, azure/<deployment>, gemini/gemini-2.5-flash"
     ),
     dpi: int = typer.Option(
-        200,
+        72,
         help="DPI for rendering PDF pages. Higher DPI may improve OCR accuracy if document is blurry.",
     ),
     max_group_pages: int = typer.Option(3, help="Max pages to merge for continued content"),
-    no_grouping: bool = typer.Option(
-        False, help="Disable LLM-based grouping. This may result in less accurate OCR results."
+    grouping: bool = typer.Option(
+        True,
+        "--grouping/--no-grouping",
+        help="Enable LLM-based grouping of continued content",
     ),
     temperature: float = typer.Option(
         0.2, help="LLM temperature. Lower makes OCR results more reliable."
@@ -54,7 +56,7 @@ def run(
         output_path=Path(output),
         dpi=dpi,
         max_group_pages=max_group_pages,
-        enable_grouping=not no_grouping,
+        enable_grouping=grouping,
         temperature=temperature,
         concurrency=concurrency,
         allow_docx=allow_docx,

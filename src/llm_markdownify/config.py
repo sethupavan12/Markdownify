@@ -17,7 +17,7 @@ class MarkdownifyConfig(BaseModel):
     input_path: Path = Field(..., description="Path to input PDF/DOCX file")
     output_path: Path = Field(..., description="Path to output Markdown file")
 
-    dpi: int = Field(200, ge=72, le=600, description="DPI used to render PDF pages")
+    dpi: int = Field(72, ge=72, le=600, description="DPI used to render PDF pages")
     max_group_pages: int = Field(3, ge=1, le=10, description="Max pages to group together")
     enable_grouping: bool = Field(True, description="Enable LLM-based grouping")
 
@@ -37,7 +37,7 @@ class MarkdownifyConfig(BaseModel):
     concurrency: int = Field(
         4,
         ge=1,
-        le=16,
+        le=1000,
         description="Max concurrent LLM requests when processing page groups",
     )
 

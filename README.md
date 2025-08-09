@@ -1,13 +1,17 @@
-## markdownify
+## Markdownify
 
-Convert documents (PDF, DOCX) to high-quality Markdown using Vision LLMs via LiteLLM. Tables become Markdown tables, charts become Mermaid diagrams, and images get concise summaries. Use as a CLI or Python library.
+Mardownify is a super easy-to-use PDF to high-quality Markdown converter using Vision LLMs. It supports text, images, signatures, tables, charts, flowcharts and preserves document structure (Headings, numbered lists etc).
+
+Tables become Markdown tables, charts become Mermaid diagrams, and images get concise summaries. Use as a CLI or Python library. Works with 100+ LLMs. Recommended to use with `gpt-5-mini` or `gpt-4.1-mini` or even better models for better performance. 
 
 ### Features
-- High-fidelity page rendering from PDF
-- Optional DOCX→PDF conversion
-- LLM-driven grouping of continued content across pages (tables/charts/images)
-- Vision LLM prompts tuned for clean Markdown, Mermaid, and structured headings
-- Works with LiteLLM providers, including OpenAI, Gemini, Azure OpenAI, and OpenAI-compatible APIs
+- High-quality complex markdown generation powered by LLMs. 
+- Supports Text, Images, Tables, Charts.
+- Built-in prompts tuned for clean Markdown, Mermaid, and structured headings along with ability to customise.
+- Supports multi-page tables, charts and images.
+- High-fidelity page rendering from PDF.
+- Optional DOCX→PDF conversion using MS word installation.
+- Works seamlessly with 100+ LLMs with LiteLLM Intergration.
 
 ### Install
 ```bash
@@ -16,14 +20,9 @@ uv pip install llm-markdownify
 pip install llm-markdownify
 ```
 
-Optional DOCX support (macOS/Windows via Word):
-```bash
-pip install llm-markdownify[docx]
-```
-
 ### Quickstart (CLI)
 ```bash
-markdownify run input.pdf -o output.md --model gpt-4o-mini
+markdownify run input.pdf -o output.md --model gpt-5-mini
 ```
 
 ### Python API (one-liner)
@@ -33,10 +32,15 @@ from llm_markdownify import convert
 convert(
     "input.pdf",
     "output.md",
-    model="gpt-4.1-mini",   # optional; can rely on env/provider defaults
-    dpi=200,
+    model="gpt-5-mini",   # optional; can rely on env/provider defaults
+    dpi=72,
     profile="contracts",    # or path to JSON profile
 )
+```
+
+Optional DOCX support (macOS/Windows via Word):
+```bash
+pip install llm-markdownify[docx]
 ```
 
 ### Configure your provider (via LiteLLM)
@@ -49,17 +53,17 @@ Pick one of the following. See the full providers list and details in the LiteLL
     ```
   - Example usage:
     ```bash
-    markdownify run input.pdf -o output.md --model gpt-4o-mini
+    markdownify run input.pdf -o output.md --model gpt-5-mini
     ```
 
 - **Google Gemini**
   - Set your API key (Google AI Studio key):
     ```bash
-    export GOOGLE_API_KEY="AIza..."
+    export GOOGLE_API_KEY="..."
     ```
   - Example usage (pick a Gemini vision-capable model):
     ```bash
-    markdownify run input.pdf -o output.md --model gemini/gemini-1.5-flash
+    markdownify run input.pdf -o output.md --model gemini/gemini-2.5-flash
     ```
 
 - **Azure OpenAI**
@@ -67,7 +71,7 @@ Pick one of the following. See the full providers list and details in the LiteLL
     ```bash
     export AZURE_API_KEY="..."
     export AZURE_API_BASE="https://<your-resource>.openai.azure.com"
-    export AZURE_API_VERSION="2024-02-15-preview"
+    export AZURE_API_VERSION=""
     ```
   - Use your deployment name via the `azure/<deployment_name>` model syntax:
     ```bash
@@ -90,7 +94,7 @@ Pick one of the following. See the full providers list and details in the LiteLL
 For additional providers and advanced configuration (fallbacks, cost tracking, streaming), see the LiteLLM docs: [Getting Started](https://docs.litellm.ai/).
 
 ### Configuration flags
-- `--model`: LiteLLM model (e.g., `gpt-4o-mini`, `azure/<deployment>`, `gemini/gemini-1.5-flash`)
+- `--model`: LiteLLM model (e.g., `gpt-5-mini`, `azure/<deployment>`, `gemini/gemini-2.5-flash`)
 - `--dpi`: Render DPI (default 200)
 - `--max-group-pages`: Max pages to merge for continued content (default 3)
 - `--no-grouping`: Disable LLM-based grouping
