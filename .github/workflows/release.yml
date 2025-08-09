@@ -7,6 +7,7 @@ name: Release
 on:
   release:
     types: [created]
+  workflow_dispatch:
 
 jobs:
   publish:
@@ -17,10 +18,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v3
-      - name: Build
+      - name: Build (sdist + wheel)
         run: |
-          uv build
+          uv build --sdist --wheel
+      - name: Verify metadata
+        run: |
+          uvx twine check dist/*
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@v1.10.0
+        uses: pypa/gh-action-pypi-publish@release/v1
         with:
+          packages-dir: dist
           password: ${{ secrets.PYPI_API_TOKEN }}
+          skip-existing: true
+          verbose: true
+          print-hash: true
