@@ -95,7 +95,7 @@ For additional providers and advanced configuration (fallbacks, cost tracking, s
 
 ### Configuration flags
 - `--model`: LiteLLM model (e.g., `gpt-5-mini`, `azure/<deployment>`, `gemini/gemini-2.5-flash`)
-- `--dpi`: Render DPI (default 200)
+- `--dpi`: Render DPI (default 72)
 - `--max-group-pages`: Max pages to merge for continued content (default 3)
 - `--no-grouping`: Disable LLM-based grouping
 - `--temperature`, `--max-tokens`: LLM generation params
