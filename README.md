@@ -62,7 +62,6 @@ Pick one of the following. See the full providers list and details in the LiteLL
   - Example usage:
     ```bash
     markdownify input.pdf -o output.md --model gpt-5-mini
-    markdownify input.pdf -o output.md --model gpt-5-mini
     ```
 
 - **Google Gemini**
@@ -72,7 +71,6 @@ Pick one of the following. See the full providers list and details in the LiteLL
     ```
   - Example usage (pick a Gemini vision-capable model):
     ```bash
-    markdownify input.pdf -o output.md --model gemini/gemini-2.5-flash
     markdownify input.pdf -o output.md --model gemini/gemini-2.5-flash
     ```
 
@@ -86,7 +84,6 @@ Pick one of the following. See the full providers list and details in the LiteLL
   - Use your deployment name via the `azure/<deployment_name>` model syntax:
     ```bash
     markdownify input.pdf -o output.md --model azure/<deployment_name>
-    markdownify input.pdf -o output.md --model azure/<deployment_name>
     ```
   - See: [LiteLLM Azure OpenAI](https://docs.litellm.ai/docs/providers/azure_openai)
 
@@ -98,7 +95,6 @@ Pick one of the following. See the full providers list and details in the LiteLL
     ```
   - Use the model name supported by that endpoint:
     ```bash
-    markdownify input.pdf -o output.md --model <model-name>
     markdownify input.pdf -o output.md --model <model-name>
     ```
   - Reference: [LiteLLM Providers](https://docs.litellm.ai/docs/providers)
