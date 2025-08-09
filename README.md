@@ -4,6 +4,8 @@ Mardownify is a super easy-to-use PDF/image to high-quality Markdown converter u
 
 Tables become Markdown tables, charts become Mermaid diagrams, and images get concise summaries. Use as a CLI or Python library. Works with 100+ LLMs. Recommended to use with `gpt-5-mini` or `gpt-4.1-mini` or even better models for better performance. 
 
+If you don't believe it there's a whole gallery of examples with really wide range of OCR tasks you can explore here -> [Gallery](https://github.com/sethupavan12/Markdownify/blob/main/examples/gallery.md) 
+
 <img width="2000" height="600" alt="image" src="https://github.com/user-attachments/assets/9a8b5176-03d8-4063-a8f3-4b1e52bdbe72" />
 
 ### Install
