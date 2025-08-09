@@ -1,0 +1,19 @@
+# Copyright (c) 2025 Sethu Pavan Venkata Reddy Pastula
+# Licensed under the Apache License, Version 2.0. See LICENSE file for details.
+# SPDX-License-Identifier: Apache-2.0
+
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.4.10
+    hooks:
+      - id: ruff
+        args: ["--fix"]
+      - id: ruff-format
+  - repo: local
+    hooks:
+      - id: add-apache-header
+        name: add-apache-header
+        entry: python scripts/add_header.py
+        language: system
+        pass_filenames: true
+        files: \.(py|toml|yml|yaml)$

@@ -1,0 +1,26 @@
+# Copyright (c) 2025 Sethu Pavan Venkata Reddy Pastula
+# Licensed under the Apache License, Version 2.0. See LICENSE file for details.
+# SPDX-License-Identifier: Apache-2.0
+
+name: Release
+
+on:
+  release:
+    types: [created]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - name: Build
+        run: |
+          uv build
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@v1.10.0
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
