@@ -118,4 +118,4 @@ Check [CONTRIBUTING.md](CONTRIBUTING.md) for more details
 ### Releasing
 GitHub Actions are configured to:
 - Run tests on PRs/pushes
-- Build & publish to PyPI on tagged releases (requires `PYPI_API_TOKEN` secret)
+- Build & publish to PyPI on tagged releases
