@@ -113,6 +113,8 @@ This project uses the Apache 2.0 License, which includes an attribution/NOTICE r
 - Run tests: `pytest`
 - Lint: `ruff check src tests`
 
+Check [CONTRIBUTING.md](CONTRIBUTING.md) for more details
+
 ### Releasing
 GitHub Actions are configured to:
 - Run tests on PRs/pushes
