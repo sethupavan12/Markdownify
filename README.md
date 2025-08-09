@@ -1,6 +1,6 @@
 ## Markdownify
 
-Mardownify is a super easy-to-use PDF to high-quality Markdown converter using Vision LLMs. It supports text, images, signatures, tables, charts, flowcharts and preserves document structure (Headings, numbered lists etc).
+Mardownify is a super easy-to-use PDF/image to high-quality Markdown converter using Vision LLMs. It supports text, images, signatures, tables, charts, flowcharts and preserves document structure (Headings, numbered lists etc).
 
 Tables become Markdown tables, charts become Mermaid diagrams, and images get concise summaries. Use as a CLI or Python library. Works with 100+ LLMs. Recommended to use with `gpt-5-mini` or `gpt-4.1-mini` or even better models for better performance. 
 
@@ -15,7 +15,11 @@ pip install llm-markdownify
 
 ### Quickstart (CLI)
 ```bash
+# PDF input
 markdownify input.pdf -o output.md --model gpt-5-mini
+
+# Or single image input (PNG/JPG/JPEG)
+markdownify input.png -o output.md --model gpt-5-mini
 ```
 
 ### Features
@@ -32,7 +36,7 @@ markdownify input.pdf -o output.md --model gpt-5-mini
 from llm_markdownify import convert
 
 convert(
-    "input.pdf",
+    "input.pdf",  # or an image path like "input.png"
     "output.md",
     model="gpt-5-mini",   # optional; can rely on env/provider defaults
     dpi=72,
@@ -56,6 +60,7 @@ Pick one of the following. See the full providers list and details in the LiteLL
   - Example usage:
     ```bash
     markdownify input.pdf -o output.md --model gpt-5-mini
+    markdownify input.pdf -o output.md --model gpt-5-mini
     ```
 
 - **Google Gemini**
@@ -65,6 +70,7 @@ Pick one of the following. See the full providers list and details in the LiteLL
     ```
   - Example usage (pick a Gemini vision-capable model):
     ```bash
+    markdownify input.pdf -o output.md --model gemini/gemini-2.5-flash
     markdownify input.pdf -o output.md --model gemini/gemini-2.5-flash
     ```
 
@@ -78,6 +84,7 @@ Pick one of the following. See the full providers list and details in the LiteLL
   - Use your deployment name via the `azure/<deployment_name>` model syntax:
     ```bash
     markdownify input.pdf -o output.md --model azure/<deployment_name>
+    markdownify input.pdf -o output.md --model azure/<deployment_name>
     ```
   - See: [LiteLLM Azure OpenAI](https://docs.litellm.ai/docs/providers/azure_openai)
 
@@ -90,6 +97,7 @@ Pick one of the following. See the full providers list and details in the LiteLL
   - Use the model name supported by that endpoint:
     ```bash
     markdownify input.pdf -o output.md --model <model-name>
+    markdownify input.pdf -o output.md --model <model-name>
     ```
   - Reference: [LiteLLM Providers](https://docs.litellm.ai/docs/providers)
 
@@ -97,7 +105,7 @@ For additional providers and advanced configuration (fallbacks, cost tracking, s
 
 ### Configuration flags
 - `--model`: LiteLLM model (e.g., `gpt-5-mini`, `azure/<deployment>`, `gemini/gemini-2.5-flash`)
-- `--dpi`: Render DPI (default 72)
+- `--dpi`: Render DPI (default 72). Ignored for direct image inputs.
 - `--max-group-pages`: Max pages to merge for continued content (default 3)
 - `--no-grouping`: Disable LLM-based grouping
 - `--temperature`, `--max-tokens`: LLM generation params

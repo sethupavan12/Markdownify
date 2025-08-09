@@ -1,0 +1,1 @@
+Figure: A small rectangular grayscale image showing the single word "Colchester" in a serif typeface, centered within a faint rectangular border. The letters are dark gray on a lighter gray background; the initial "C" is capitalized and the remaining letters are lowercase. The image has slight vignetting at the edges and a subtle paper-like texture visible in the background.

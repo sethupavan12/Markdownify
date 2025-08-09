@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Iterable, List
 
 import pypdfium2 as pdfium
+from PIL import Image
 
 from .logging import get_logger
 
@@ -62,7 +63,12 @@ def iter_pdf_pages_as_images(pdf_path: Path, dpi: int) -> Iterable[PageImage]:
 
 
 def load_document_pages(input_path: Path, dpi: int, allow_docx: bool = False) -> List[PageImage]:
-    """Load a PDF (preferred) or DOCX (if allowed) as a list of rendered page images."""
+    """Load a PDF, image (PNG/JPG/JPEG), or DOCX (if allowed) as a list of page images.
+
+    - PDF: rendered to page PNGs using pypdfium2 at the provided DPI
+    - Image (.png/.jpg/.jpeg): treated as a single page; converted to PNG bytes
+    - DOCX: optionally converted to PDF, then rendered like a PDF
+    """
     suffix = input_path.suffix.lower()
     if suffix == ".docx":
         if not allow_docx:
@@ -70,9 +76,25 @@ def load_document_pages(input_path: Path, dpi: int, allow_docx: bool = False) ->
                 "DOCX not allowed. Prefer exporting DOCX to PDF, or enable --allow-docx (requires Word/COM)."
             )
         pdf_path = _docx_to_pdf(input_path)
-    else:
-        pdf_path = input_path
+        pages = list(iter_pdf_pages_as_images(pdf_path, dpi=dpi))
+        logger.info("Loaded %d pages", len(pages))
+        return pages
 
-    pages = list(iter_pdf_pages_as_images(pdf_path, dpi=dpi))
-    logger.info("Loaded %d pages", len(pages))
-    return pages
+    if suffix == ".pdf":
+        pages = list(iter_pdf_pages_as_images(input_path, dpi=dpi))
+        logger.info("Loaded %d pages", len(pages))
+        return pages
+
+    if suffix in {".png", ".jpg", ".jpeg"}:
+        with Image.open(input_path) as img:
+            rgb_img = img.convert("RGB")
+            with BytesIO() as buf:
+                rgb_img.save(buf, format="PNG")
+                data = buf.getvalue()
+            page = PageImage(index=0, width=rgb_img.width, height=rgb_img.height, content=data)
+        logger.info("Loaded 1 image page from %s", input_path)
+        return [page]
+
+    raise ValueError(
+        f"Unsupported input type: {suffix}. Expected one of .pdf, .docx, .png, .jpg, .jpeg"
+    )

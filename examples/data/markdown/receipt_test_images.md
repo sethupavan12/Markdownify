@@ -1,0 +1,42 @@
+KWIKSPAR
+Welcome To
+LOERTE KWIKSPAR
+VAT NUMBER: 4680293653
+Tel no: 015 880 1518
+
+R 32.99 *
+39.98 A
+62.76 A
+135.73
+135.73
+
+CLOVER MLK E/CRM 2LT
+ENGLISH MUFFIN BREAKFAST 1'S
+SSC CORN & CHSE 2 @ 19.99 1'S
+
+TOTAL 31.38
+FOR 3 ITEMS
+TENDERED Credit Card
+
+TAX INVOICE
+TAX 0.00
+13.40
+
+VAT rate
+0.00% 32.99 exc
+15.00% 89.34
+
+incl.
+32.99 *
+102.74 A
+
+Hi Anthony, Card Number: *****4231
+Thank you for swiping your SPAR Rewards Card.
+
+SLIP / TILL / CASHIER / DATE / TIME
+1763 / 002 / LUCY / 131 05.04.24 07:24
+CASHIER NAME: LUCY
+Thank You For Shopping With Us
+Trading Hours
+MON-SAT 06:30 - 20:00
+SUN 08:00 - 19:00

@@ -28,10 +28,10 @@ def convert(
     """Convert a document to Markdown using the configured LLM via LiteLLM.
 
     Parameters
-    - input_path: PDF path (preferred) or DOCX if `allow_docx=True`
+    - input_path: PDF path (preferred), image file (.png/.jpg/.jpeg), or DOCX if `allow_docx=True`
     - output_path: Markdown file destination
     - model: LiteLLM model name (e.g., 'gpt-4.1-mini', 'azure/<deployment>', 'gemini/gemini-2.5-flash')
-    - dpi: Render DPI for PDF pages (higher = slower, clearer)
+    - dpi: Render DPI for PDF pages (ignored for direct image inputs). Higher = slower, clearer
     - max_group_pages: Max pages to merge when a table/chart spans pages
     - enable_grouping: Whether to use LLM to detect cross-page continuations
     - temperature: LLM temperature

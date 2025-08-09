@@ -9,14 +9,14 @@ build-backend = "hatchling.build"
 [project]
 name = "llm-markdownify"
 version = "0.1.0"
-description = "Convert documents (PDF, DOCX) to high-quality Markdown using Vision LLMs via LiteLLM"
+description = "Convert PDFs, images to high-quality Markdown using Vision LLMs."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
 authors = [
   { name = "Sethu Pavan Venkata Reddy Pastula" }
 ]
-keywords = ["markdown", "pdf", "docx", "llm", "vision", "ocr", "litellm"]
+keywords = ["markdown", "pdf", "docx", "image", "png", "jpg", "jpeg", "llm", "vision", "ocr", "litellm"]
 classifiers = [
   "Programming Language :: Python :: 3",
   "License :: OSI Approved :: Apache Software License",
@@ -25,7 +25,7 @@ classifiers = [
   "Topic :: Utilities",
 ]
 dependencies = [
-  "litellm[proxy]>=1.43.0",
+  "litellm>=1.43.0",
   "pypdfium2>=4.30.0",
   "Pillow>=10.3.0",
   "typer>=0.12.3",
@@ -74,6 +74,14 @@ line-length = 100
 packages = ["src/llm_markdownify"]
 
 [tool.hatch.build]
+include = [
+  "src/llm_markdownify/**",
+  "README.md",
+  "LICENSE",
+  "NOTICE",
+]
+
+[tool.hatch.build.targets.sdist]
 include = [
   "src/llm_markdownify/**",
   "README.md",

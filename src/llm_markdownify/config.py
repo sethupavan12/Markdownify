@@ -14,10 +14,17 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 class MarkdownifyConfig(BaseModel):
     """Configuration for the markdownification process."""
 
-    input_path: Path = Field(..., description="Path to input PDF/DOCX file")
+    input_path: Path = Field(
+        ..., description="Path to input PDF/DOCX or image file (.png/.jpg/.jpeg)"
+    )
     output_path: Path = Field(..., description="Path to output Markdown file")
 
-    dpi: int = Field(72, ge=72, le=600, description="DPI used to render PDF pages")
+    dpi: int = Field(
+        72,
+        ge=72,
+        le=600,
+        description="DPI used to render PDF pages (ignored for direct image inputs)",
+    )
     max_group_pages: int = Field(3, ge=1, le=10, description="Max pages to group together")
     enable_grouping: bool = Field(True, description="Enable LLM-based grouping")
 
@@ -49,8 +56,8 @@ class MarkdownifyConfig(BaseModel):
     def _validate_input(cls, path: Path) -> Path:
         if not path.exists():
             raise ValueError(f"Input file not found: {path}")
-        if path.suffix.lower() not in {".pdf", ".docx"}:
-            raise ValueError("input_path must be a .pdf or .docx file")
+        if path.suffix.lower() not in {".pdf", ".docx", ".png", ".jpg", ".jpeg"}:
+            raise ValueError("input_path must be a .pdf, .docx, .png, .jpg, or .jpeg file")
         return path
 
     @field_validator("output_path")

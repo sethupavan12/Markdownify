@@ -12,13 +12,20 @@ import typer
 from .config import MarkdownifyConfig
 from .markdownifier import Markdownifier
 
-app = typer.Typer(help="Convert documents (PDF) to Markdown using Vision LLMs via LiteLLM.")
+app = typer.Typer(
+    help=(
+        "Convert documents (PDF/DOCX) or images (PNG/JPG/JPEG) to Markdown using Vision LLMs via LiteLLM."
+    )
+)
 
 
 @app.command()
 def run(
     input_path: str = typer.Argument(
-        ..., help="Path to input .pdf (preferred) or .docx (discouraged)"
+        ...,
+        help=(
+            "Path to input .pdf (preferred), .docx (discouraged), or image file (.png/.jpg/.jpeg)"
+        ),
     ),
     output: str = typer.Option(..., "-o", "--output", help="Output .md path"),
     model: Optional[str] = typer.Option(
@@ -26,7 +33,9 @@ def run(
     ),
     dpi: int = typer.Option(
         72,
-        help="DPI for rendering PDF pages. Higher DPI may improve OCR accuracy if document is blurry.",
+        help=(
+            "DPI for rendering PDF pages (ignored for direct image inputs). Higher DPI may improve OCR accuracy if the document is blurry."
+        ),
     ),
     max_group_pages: int = typer.Option(3, help="Max pages to merge for continued content"),
     grouping: bool = typer.Option(
