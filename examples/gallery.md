@@ -2,6 +2,8 @@
 The following examples were generated using the default profile. However, you can create your own profile with specific instructions like what to avoid, image summary style, table rendering style, chart rendering styles etc
 - Total examples: 82
 
+It's easy if you open the preview in a new window/tab for comparision.
+
 | Image | Markdown |
 | --- | --- |
 | ![](data/ocr/ASCII_art__temp_image_2489.png) | [View preview](#ascii_art) |
