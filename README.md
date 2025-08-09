@@ -4,6 +4,7 @@ Mardownify is a super easy-to-use PDF to high-quality Markdown converter using V
 
 Tables become Markdown tables, charts become Mermaid diagrams, and images get concise summaries. Use as a CLI or Python library. Works with 100+ LLMs. Recommended to use with `gpt-5-mini` or `gpt-4.1-mini` or even better models for better performance. 
 
+<img width="2000" height="600" alt="image" src="https://github.com/user-attachments/assets/9a8b5176-03d8-4063-a8f3-4b1e52bdbe72" />
 ### Install
 ```bash
 uv pip install llm-markdownify
