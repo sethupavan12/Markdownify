@@ -17,6 +17,8 @@ pip install llm-markdownify
 
 ### Quickstart (CLI)
 ```bash
+# Set OpenAI key as env var
+export OPENAI_API_KEY="sk-.."
 # PDF input
 markdownify input.pdf -o output.md --model gpt-5-mini
 
