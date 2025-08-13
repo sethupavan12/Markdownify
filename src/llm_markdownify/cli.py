@@ -53,6 +53,10 @@ def run(
         4,
         help="Max concurrent LLM requests for page groups. Higher concurrency means faster processing at the risk of hitting rate limits.",
     ),
+    grouping_concurrency: Optional[int] = typer.Option(
+        None,
+        help="Max concurrent LLM requests for adjacent-page continuation checks (defaults to --concurrency)",
+    ),
     profile: Optional[str] = typer.Option(
         None, help="Prompt profile name (e.g., 'contracts', 'generic') or path to JSON profile"
     ),
@@ -74,6 +78,8 @@ def run(
         cfg_kwargs["model"] = model
     if max_tokens is not None:
         cfg_kwargs["max_tokens"] = max_tokens
+    if grouping_concurrency is not None:
+        cfg_kwargs["grouping_concurrency"] = grouping_concurrency
 
     cfg = MarkdownifyConfig(**cfg_kwargs)
     Markdownifier(cfg, profile=profile).run()

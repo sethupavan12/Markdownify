@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 import base64
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from io import BytesIO
 from pathlib import Path
 from typing import Iterable, List
@@ -29,11 +29,39 @@ class PageImage:
     width: int
     height: int
     content: bytes  # PNG bytes
+    _data_url: str | None = field(default=None, init=False, repr=False, compare=False)
+    _continuation_data_url: str | None = field(default=None, init=False, repr=False, compare=False)
 
     @property
     def data_url(self) -> str:
-        b64 = base64.b64encode(self.content).decode("ascii")
-        return f"data:image/png;base64,{b64}"
+        if self._data_url is None:
+            b64 = base64.b64encode(self.content).decode("ascii")
+            self._data_url = f"data:image/png;base64,{b64}"
+        return self._data_url
+
+    @property
+    def continuation_data_url(self) -> str:
+        """Smaller JPEG data URL for LLM continuation checks.
+
+        Downscale to max width 1024px preserving aspect ratio to reduce upload size/latency.
+        Cached after first computation.
+        """
+        if self._continuation_data_url is None:
+            max_width = 1024
+            with BytesIO(self.content) as buf:
+                img = Image.open(buf)
+                img.load()
+            if img.width > max_width:
+                ratio = max_width / float(img.width)
+                new_size = (max_width, max(1, int(img.height * ratio)))
+                img = img.resize(new_size, Image.LANCZOS)
+            with BytesIO() as out:
+                img = img.convert("RGB")
+                img.save(out, format="JPEG", quality=70, optimize=True)
+                data = out.getvalue()
+            b64 = base64.b64encode(data).decode("ascii")
+            self._continuation_data_url = f"data:image/jpeg;base64,{b64}"
+        return self._continuation_data_url
 
 
 def _docx_to_pdf(input_path: Path) -> Path:

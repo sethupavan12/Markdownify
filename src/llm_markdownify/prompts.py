@@ -11,16 +11,19 @@ CONTINUATION_SYSTEM_PROMPT = (
     "- a table (gridlines/cell borders/columns cut at the bottom of page A and resuming at the top of page B), or\n"
     "- a boxed layout/panel, or\n"
     "- a chart/figure/diagram clearly split across pages.\n"
+    "Special case for TABLES: If a table appears at the bottom of page A and a table appears at the top of page B, \n"
+    "and the columns/headers/grid style appear consistent (same number/order of columns, similar column widths, same border style),\n"
+    "treat this as a continuation even if the page break hides the junction.\n"
     "Plain text paragraphs DO NOT qualify. Headings and body text continuity alone is NOT a reason to merge.\n"
     "If uncertain, respond NONE. Respond with ONLY one token: CONTINUE_NEXT or NONE."
 )
 
 CONTINUATION_USER_PROMPT = (
-    "Check for split visual structures at the bottom of page A and the top of page B: \n"
-    "- table gridlines or cell borders continuing,\n"
-    "- boxed panels continuing,\n"
-    "- charts/figures cut between pages.\n"
-    "If you see such a split visual structure, answer CONTINUE_NEXT. Otherwise answer NONE."
+    "Check the bottom of page A and the top of page B for split visual structures: \n"
+    "- Tables: same columns/headers/border style and alignment across pages (even if the break hides the seam).\n"
+    "- Boxed panels continuing.\n"
+    "- Charts/figures cut between pages.\n"
+    "If found, answer CONTINUE_NEXT. Otherwise answer NONE."
 )
 
 MARKDOWN_SYSTEM_PROMPT = (

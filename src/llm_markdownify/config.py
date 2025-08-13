@@ -48,6 +48,13 @@ class MarkdownifyConfig(BaseModel):
         description="Max concurrent LLM requests when processing page groups",
     )
 
+    grouping_concurrency: Optional[int] = Field(
+        None,
+        ge=1,
+        le=1000,
+        description="Max concurrent LLM requests for adjacent-page continuation checks (defaults to concurrency)",
+    )
+
     # Optional path where page images are cached for debugging
     cache_dir: Optional[Path] = Field(None)
 

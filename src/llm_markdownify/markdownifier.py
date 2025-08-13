@@ -39,6 +39,11 @@ class Markdownifier:
             max_group_pages=self.config.max_group_pages,
             enable_grouping=self.config.enable_grouping,
             profile=self.profile,
+            grouping_concurrency=(
+                self.config.grouping_concurrency
+                if self.config.grouping_concurrency
+                else self.config.concurrency
+            ),
         )
 
     def _markdown_for_group(self, group: List[PageImage]) -> str:
