@@ -109,6 +109,7 @@ For additional providers and advanced configuration (fallbacks, cost tracking, s
 - `--max-group-pages`: Max pages to merge for continued content (default 3)
 - `--no-grouping`: Disable LLM-based grouping
 - `--temperature`, `--max-tokens`: LLM generation params
+- `--grouping_concurrency` : to control how many checks are made at once (defaults to `concurrency`)
 
 ### Attribution & License
 This project uses the Apache 2.0 License, which includes an attribution/NOTICE requirement. If you distribute or use this project, please keep the `LICENSE` and `NOTICE` files intact, crediting the original author, Sethu Pavan Venkata Reddy Pastula.
