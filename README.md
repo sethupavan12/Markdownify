@@ -69,13 +69,22 @@ Pick one of the following. See the full providers list and details in the LiteLL
 - **Google Gemini**
   - Set your API key (Google AI Studio key):
     ```bash
-    export GOOGLE_API_KEY="..."
+    export GEMINI_API_KEY="..."
     ```
   - Example usage (pick a Gemini vision-capable model):
     ```bash
     markdownify input.pdf -o output.md --model gemini/gemini-2.5-flash
     ```
 
+- **OpenRouter**
+  - Set your API key (OpenRouter API Key):
+    ```bash
+    export OPENROUTER_API_KEY="..."
+    ```
+  - Example usage (pick a Gemini vision-capable model):
+    ```bash
+    markdownify input.pdf -o output.md --model openrouter/z-ai/glm-4.5v
+    ```
 - **Azure OpenAI**
   - Set these environment variables (values from your Azure OpenAI resource):
     ```bash
@@ -87,7 +96,7 @@ Pick one of the following. See the full providers list and details in the LiteLL
     ```bash
     markdownify input.pdf -o output.md --model azure/<deployment_name>
     ```
-  - See: [LiteLLM Azure OpenAI](https://docs.litellm.ai/docs/providers/azure_openai)
+  - See: [LiteLLM Azure OpenAI](https://docs.litellm.ai/docs/providers/azure/#overview)
 
 - **OpenAI-compatible APIs**
   - Many providers expose an OpenAI-compatible REST API. Set your API key and base URL:
