@@ -116,7 +116,7 @@ Most power supplies are constant voltage. 120V AC from the wall is stepped down 
 
 The rapid switching of the buck converter obviously switches both the voltage & current. Assuming the PWM signal is coming from some type of microcontroller, it's fairly simple to adjust this based on just about any factor ever. There ICs, like the Diodes, Inc. AL8960 that the FemtoBuck is based on can somehow detect voltage (or current in this case) and manage the switching without a controller. I cannot comprehend how that part works. Maybe I'll figure that out but for now it really isn't relevant.
 
-Buck converters require at least a few volts of headroom, so I won't be able to run the lamp with a 5V supply. The next larger size that's conveniently available is 12V. I'm concerned that because the FemtoBuck doesn't directly control the voltage, it will over-volt the LED panel.<|end_of_box|>
+Buck converters require at least a few volts of headroom, so I won't be able to run the lamp with a 5V supply. The next larger size that's conveniently available is 12V. I'm concerned that because the FemtoBuck doesn't directly control the voltage, it will over-volt the LED panel.
 
 ### ASCII_art
 
