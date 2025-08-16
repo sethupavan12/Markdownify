@@ -1,8 +1,16 @@
 ## OCR Gallery
 The following examples were generated using the default profile. However, you can create your own profile with specific instructions like what to avoid, image summary style, table rendering style, chart rendering styles etc
-- Total examples: 82
 
-It's easy if you open the preview in a new window/tab for comparision.
+There's many applications for Markdownify but here are some popular ones: (It's easy if you open the preview in a new window/tab for comparision.)
+
+1. Convert Handwritten class notes to Markdown
+
+| Image | Markdown |
+| --- | --- |
+| ![](https://github.com/user-attachments/assets/37f27ae6-e8a7-4180-a239-18e878cabbf7) | [View preview](#handnotes) |
+
+
+
 
 | Image | Markdown |
 | --- | --- |
@@ -88,6 +96,27 @@ It's easy if you open the preview in a new window/tab for comparision.
 | ![](data/ocr/websrc_testset__0200001.png) | [View preview](#websrc_testset) |
 | ![](data/ocr/wtq__csv_204-csv_719.png) | [View preview](#wtq) |
 | ![](data/ocr/wtwvqa__mit_google_image_search-000079-b1a208b2dfe6fa0eddf6789eeb5897176c2c2740.jpg) | [View preview](#wtwvqa) |
+
+### handnotes
+with the help of 3 simple, basic components: a diode, an inductor, and a capacitor
+
+- The diode is the simplest of the three. It allows current to flow in one direction (when the diode is in a "forward-biased" condition) but not the other, as shown in Figure 7-3.
+
+- The inductor, also known simply as a coil, serves many purposes related to signal and frequency manipulation. A coiled conductor creates a magnetic field around itself when energized with DC voltage. This makes the coil resist sudden or rapid changes in current. When running at a given amperage, if the current in the coil and the magnetic field are at equilibrium with each other. If the current increases, some of it is "spent" to expand the field. If the current decreases, some of the energy in the magnetic field is "returned" to the conductor, maintaining the original current for a brief moment. Delaying these current changes creates the damping/smoothing effect shown in Fig. 7-4.
+
+- The capacitor serves a similar purpose, only working with voltage instead of current. A capacitor stores a charge, like a tiny battery. When one leg is connected to a signals line and the other to ground, the signal can be smoothed. Figure 7-5 demonstrates the output of a full-wave bridge rectifier with and without a capacitor across the output.
+
+Astute readers have likely already pieced together the flywheel circuit, but I will continue with the explanation for the sake of completeness. The signal coming out of the switching transistor is a jagged, interrupted waveform, sometimes plenty of voltage and current, sometimes none. The capacitor soaks up nearly all of the voltage fluctuation, leaving a relatively flat output at a lower voltage, and the inductor performs the same task for the intermittent current. The final piece of the puzzle is the diode, which allows there to be a complete circuit so that current is free to flow out when the transistor is off and the current is being driven by the capacitor and inductor. Its one-way nature prevents a short to ground when the transistor is on, which would render the whole circuit non-functional.
+
+With a solid understanding of the buck converter converters pulled together, tomorrow will see an investigation of their application in constant-current LED drivers such as the FemtoBuck.
+
+Fig 8 - Achieving Constant-Current Behavior with Buck Converters 2-18-24
+
+Most power supplies are constant voltage. 120V AC from the wall is stepped down to 12 or 5 or whatever else, and then rectified to DC. That voltage level cannot change, but the current will settle at whatever amount the circuit naturally pulls.
+
+The rapid switching of the buck converter obviously switches both the voltage & current. Assuming the PWM signal is coming from some type of microcontroller, it's fairly simple to adjust this based on just about any factor ever. There ICs, like the Diodes, Inc. AL8960 that the FemtoBuck is based on can somehow detect voltage (or current in this case) and manage the switching without a controller. I cannot comprehend how that part works. Maybe I'll figure that out but for now it really isn't relevant.
+
+Buck converters require at least a few volts of headroom, so I won't be able to run the lamp with a 5V supply. The next larger size that's conveniently available is 12V. I'm concerned that because the FemtoBuck doesn't directly control the voltage, it will over-volt the LED panel.<|end_of_box|>
 
 ### ASCII_art
 
