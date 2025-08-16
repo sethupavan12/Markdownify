@@ -1,16 +1,7 @@
 ## OCR Gallery
 The following examples were generated using the default profile. However, you can create your own profile with specific instructions like what to avoid, image summary style, table rendering style, chart rendering styles etc
 
-There's many applications for Markdownify but here are some popular ones: (It's easy if you open the preview in a new window/tab for comparision.)
-
-1. Convert Handwritten class notes to Markdown
-
-| Image | Markdown |
-| --- | --- |
-| ![](https://github.com/user-attachments/assets/37f27ae6-e8a7-4180-a239-18e878cabbf7) | [View preview](#handnotes) |
-
-
-
+It's easy if you open the preview in a new window/tab for comparision.
 
 | Image | Markdown |
 | --- | --- |
@@ -22,6 +13,7 @@ There's many applications for Markdownify but here are some popular ones: (It's 
 | ![](data/ocr/DoTA__2205.02119_15.png) | [View preview](#dota) |
 | ![](data/ocr/DocVQA__fxxj0037_3.png) | [View preview](#docvqa) |
 | ![](data/ocr/FOX__en_41.png) | [View preview](#fox) |
+| ![](https://github.com/user-attachments/assets/37f27ae6-e8a7-4180-a239-18e878cabbf7) | [View preview](#handnotes) |
 | ![](data/ocr/HME100K__test_9802.jpg) | [View preview](#hme100k) |
 | ![](data/ocr/HOST__000000726.jpg) | [View preview](#host) |
 | ![](data/ocr/IAM__g06-011j-02-02.png) | [View preview](#iam) |
