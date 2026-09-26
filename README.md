@@ -86,6 +86,18 @@ Pick one of the following. See the full providers list and details in the LiteLL
     ```bash
     markdownify input.pdf -o output.md --model openrouter/z-ai/glm-4.5v
     ```
+- **Anthropic (Claude)**
+  ```bash
+  export ANTHROPIC_API_KEY="..."
+  markdownify input.pdf -o output.md --model anthropic/claude-sonnet-5
+  ```
+
+- **DeepSeek**
+  ```bash
+  export DEEPSEEK_API_KEY="..."
+  markdownify input.pdf -o output.md --model deepseek/deepseek-flash
+  ```
+
 - **Azure OpenAI**
   - Set these environment variables (values from your Azure OpenAI resource):
     ```bash
@@ -105,10 +117,11 @@ Pick one of the following. See the full providers list and details in the LiteLL
     export OPENAI_API_KEY="..."
     export OPENAI_API_BASE="https://your-openai-compatible-endpoint.com/v1"
     ```
-  - Use the model name supported by that endpoint:
+  - Use the model name supported by that endpoint, prefixed with `openai/`, or pass the URL per run:
     ```bash
-    markdownify input.pdf -o output.md --model <model-name>
+    markdownify input.pdf -o output.md --model openai/<model-name> --api-base https://your-endpoint/v1
     ```
+  - The same works for local servers (Ollama, LM Studio, vLLM, llama.cpp) with no API key.
   - Reference: [LiteLLM Providers](https://docs.litellm.ai/docs/providers)
 
 For additional providers and advanced configuration (fallbacks, cost tracking, streaming), see the LiteLLM docs: [Getting Started](https://docs.litellm.ai/).

@@ -144,7 +144,12 @@ def _completion_with_retry(
 ) -> tuple[str, str | None]:
     """Run one completion with retries. Returns (content, finish_reason)."""
     # Local import to allow env configuration above to take effect
+    import litellm  # type: ignore
     from litellm import completion as _litellm_completion  # type: ignore
+
+    # LiteLLM prints "If you need to debug this error..." to the terminal on every handled error,
+    # which leaks into --quiet output. We report errors ourselves.
+    litellm.suppress_debug_info = True
 
     @retry(
         retry=retry_if_exception(_is_retryable),
