@@ -118,7 +118,7 @@ def test_empty_content_is_retried_then_fails(monkeypatch):
 
     def fake_completion(**kwargs):
         calls.append(1)
-        return _response(None, "length")
+        return _response(None, "stop")
 
     monkeypatch.setattr(litellm, "completion", fake_completion)
     with pytest.raises(llm.EmptyResponseError):
@@ -280,3 +280,48 @@ def test_rate_limit_budget_is_enforced(monkeypatch):
     llm.configure_llm(max_retries=2, retry_delay=0.01)
     with pytest.raises(litellm.RateLimitError):
         llm.generate_markdown("m", ["data:a"], load_prompt_profile("generic"))
+
+
+def test_fence_stripping_keeps_documents_that_start_and_end_with_code():
+    doc = "```\ncode\n```\n\ntext\n\n```\nmore\n```"
+    assert llm.strip_markdown_fence(doc) == doc
+    wrapped = "```markdown\n# T\n\n```py\nx\n```\n```"
+    assert llm.strip_markdown_fence(wrapped) == "# T\n\n```py\nx\n```"
+
+
+def test_exhausted_output_budget_fails_fast(monkeypatch):
+    """Reasoning models that spend max_tokens thinking fail identically on every retry."""
+    calls = []
+
+    def fake_completion(**kwargs):
+        calls.append(1)
+        return _response(None, "length")
+
+    monkeypatch.setattr(litellm, "completion", fake_completion)
+    with pytest.raises(llm.OutputBudgetExhaustedError, match="max-tokens"):
+        llm.generate_markdown("m", ["data:a"], load_prompt_profile("generic"))
+    assert len(calls) == 1
+
+
+def test_rate_limits_do_not_use_up_other_retries(monkeypatch):
+    errors = [litellm.RateLimitError("rl", llm_provider="openai", model="m")] * 4 + [
+        litellm.Timeout("t", model="m", llm_provider="openai")
+    ]
+
+    def fake_completion(**kwargs):
+        if errors:
+            raise errors.pop(0)
+        return _response("# ok")
+
+    monkeypatch.setattr(litellm, "completion", fake_completion)
+    llm.configure_llm(max_retries=1, retry_delay=0.01)
+    assert llm.generate_markdown("m", ["data:a"], load_prompt_profile("generic")) == "# ok"
+
+
+def test_cache_key_ignores_transport_only_kwargs():
+    llm.configure_llm(llm_kwargs={"api_key": "a", "timeout": 5})
+    key_a = llm._request_key("m", [])
+    llm.configure_llm(llm_kwargs={"api_key": "b", "timeout": 9})
+    assert llm._request_key("m", []) == key_a
+    llm.configure_llm(llm_kwargs={"reasoning_effort": "high"})
+    assert llm._request_key("m", []) != key_a

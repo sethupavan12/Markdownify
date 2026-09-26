@@ -123,8 +123,9 @@ def iter_pdf_pages_as_images(
     pages: List[PageImage] = []
     with _PDFIUM_LOCK:
         pdf = pdfium.PdfDocument(str(pdf_path))
-        num_pages = len(pdf)
     try:
+        with _PDFIUM_LOCK:
+            num_pages = len(pdf)
         for i in range(num_pages):
             # Hold the lock only while touching PDFium; encoding below runs concurrently.
             with _PDFIUM_LOCK:
@@ -133,10 +134,12 @@ def iter_pdf_pages_as_images(
                     width_pt, height_pt = page.get_size()
                     scale = min(dpi / 72.0, max_side / max(width_pt, height_pt, 1.0))
                     bitmap = page.render(scale=scale)
-                    # Copy out of PDFium memory and free the bitmap while still holding the lock,
-                    # so no PDFium call happens later from a garbage-collector finalizer.
-                    pil_image = bitmap.to_pil().copy()
-                    bitmap.close()
+                    try:
+                        # Copy out of PDFium memory and free the bitmap while still holding the
+                        # lock, so no PDFium call happens later from a garbage-collector finalizer.
+                        pil_image = bitmap.to_pil().copy()
+                    finally:
+                        bitmap.close()
                 finally:
                     page.close()
             pages.append(_page_from_pil(i, pil_image, max_side, fmt))

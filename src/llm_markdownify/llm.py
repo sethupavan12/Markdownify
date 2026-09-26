@@ -44,7 +44,14 @@ logger = get_logger("llm_markdownify.llm")
 
 
 class EmptyResponseError(RuntimeError):
-    """The model returned no content (e.g. all tokens spent on reasoning). Retried."""
+    """The model returned no content for no visible reason. Retried."""
+
+
+class OutputBudgetExhaustedError(RuntimeError):
+    """The model hit max_tokens before writing any answer (typically all spent on reasoning).
+
+    Not retried: the same request fails the same way every time and each attempt is billed.
+    """
 
 
 class RateLimiter:
@@ -136,7 +143,10 @@ def _stop_retrying(state: RetryCallState) -> bool:
     exc = state.outcome.exception() if state.outcome else None
     if isinstance(exc, litellm.RateLimitError):
         return state.seconds_since_start >= RATE_LIMIT_BUDGET_S
-    return state.attempt_number > _max_retries  # first attempt isn't a retry
+    # Count other failures separately so waiting out rate limits doesn't use up their retries.
+    other_failures = getattr(state, "other_failures", 0) + 1
+    state.other_failures = other_failures  # type: ignore[attr-defined]
+    return other_failures > _max_retries  # first attempt isn't a retry
 
 
 def _completion_with_retry(
@@ -171,6 +181,11 @@ def _completion_with_retry(
         choice = resp["choices"][0]
         content = choice["message"]["content"]
         if not content or not str(content).strip():
+            if choice.get("finish_reason") == "length":
+                raise OutputBudgetExhaustedError(
+                    "The model used its whole output budget without answering (usually on "
+                    "reasoning). Raise --max-tokens or lower --reasoning-effort."
+                )
             raise EmptyResponseError(
                 f"Model returned empty content (finish_reason={choice.get('finish_reason')})"
             )
@@ -190,22 +205,49 @@ def _message_with_images(text: str, image_data_urls: List[str]) -> dict:
 _FENCE_RE = re.compile(r"^\s*```(?:markdown|md)?[ \t]*\n(.*?)\n?```\s*$", re.DOTALL | re.IGNORECASE)
 
 
+_INNER_FENCE_RE = re.compile(r"^\s*```", re.MULTILINE)
+
+
 def strip_markdown_fence(text: str) -> str:
-    """Remove a single fence wrapping the whole response (models often add ```markdown ... ```)."""
+    """Remove a single fence wrapping the whole response (models often add ```markdown ... ```).
+
+    A bare ``` fence is only stripped when nothing inside it is fenced too; otherwise the text is
+    a document that starts and ends with separate code blocks and must be left alone.
+    """
     match = _FENCE_RE.match(text)
-    return match.group(1) if match else text
+    if not match:
+        return text
+    tagged = text.lstrip()[3:].lower().startswith(("markdown", "md"))
+    body = match.group(1)
+    if not tagged and _INNER_FENCE_RE.search(body):
+        return text
+    return body
 
 
 def parse_continuation_label(text: str) -> str:
-    """Map a free-form model answer to CONTINUE_NEXT or NONE."""
-    normalized = text.strip().upper().replace(" ", "_")
-    return "CONTINUE_NEXT" if "CONTINUE" in normalized else "NONE"
+    """Map a free-form model answer to CONTINUE_NEXT or NONE. Anything doubtful is NONE."""
+    words = set(re.findall(r"[A-Z_]+", text.upper()))
+    if words & {"NONE", "NOT", "NO"}:
+        return "NONE"
+    if "CONTINUE_NEXT" in words or {"CONTINUE", "NEXT"} <= words:
+        return "CONTINUE_NEXT"
+    return "NONE"
+
+
+# kwargs that change how a request is sent, not what the model answers. Kept out of cache keys so
+# rotating a key or changing a timeout does not invalidate the cache.
+_TRANSPORT_ONLY_KWARGS = {"api_key", "timeout", "num_retries", "extra_headers"}
 
 
 def _request_key(model: str, messages: list, **params: Any) -> str:
     """Stable hash of everything that affects the model's answer."""
     payload = json.dumps(
-        {"model": model, "messages": messages, "params": params, "extra": _llm_kwargs},
+        {
+            "model": model,
+            "messages": messages,
+            "params": params,
+            "extra": {k: v for k, v in _llm_kwargs.items() if k not in _TRANSPORT_ONLY_KWARGS},
+        },
         sort_keys=True,
         default=str,
     )

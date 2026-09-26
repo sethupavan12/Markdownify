@@ -56,7 +56,7 @@ def _convert_one(job: tuple[Path, Path, str, dict]) -> tuple[str, float, str | N
     litellm.success_callback = [_track_usage]
     for key in _usage:
         _usage[key] = 0
-    if dst.exists():
+    if dst.exists() and dst.stat().st_size > 0:  # empty files are failed pages: retry them
         return str(dst), 0.0, None, dict(_usage)
     dst.parent.mkdir(parents=True, exist_ok=True)
     start = time.time()
