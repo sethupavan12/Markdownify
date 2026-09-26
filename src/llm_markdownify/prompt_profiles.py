@@ -21,6 +21,8 @@ class PromptProfile:
     markdown_user: str
 
 
+DEFAULT_PROFILE = "generic"
+
 _BUILTIN_PROFILES: Dict[str, PromptProfile] = {
     "contracts": PromptProfile(
         name="contracts",
@@ -31,17 +33,10 @@ _BUILTIN_PROFILES: Dict[str, PromptProfile] = {
     ),
     "generic": PromptProfile(
         name="generic",
-        continuation_system=(
-            "You analyze page images to decide if content visually continues (tables/charts split). "
-            "Respond only CONTINUE_NEXT or NONE."
-        ),
-        continuation_user=(
-            "Look for split tables/charts at the end of page A and start of page B. If found, CONTINUE_NEXT; else NONE."
-        ),
-        markdown_system=(
-            "Convert page images into clean Markdown. Use clear headings, lists, and tables; cover all pages; avoid page numbers."
-        ),
-        markdown_user=("Produce a single coherent Markdown output from the provided page images."),
+        continuation_system=default_prompts.GENERIC_CONTINUATION_SYSTEM_PROMPT,
+        continuation_user=default_prompts.GENERIC_CONTINUATION_USER_PROMPT,
+        markdown_system=default_prompts.GENERIC_MARKDOWN_SYSTEM_PROMPT,
+        markdown_user=default_prompts.GENERIC_MARKDOWN_USER_PROMPT,
     ),
 }
 

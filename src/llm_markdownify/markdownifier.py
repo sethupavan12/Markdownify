@@ -16,7 +16,7 @@ from .grouping import group_pages
 from .llm import configure_llm, generate_markdown
 from .logging import get_logger, set_log_level
 from .pager import PageImage, load_document_pages
-from .prompt_profiles import load_prompt_profile, PromptProfile
+from .prompt_profiles import DEFAULT_PROFILE, PromptProfile, load_prompt_profile
 
 logger = get_logger("llm_markdownify.core")
 
@@ -26,7 +26,7 @@ class Markdownifier:
 
     def __init__(self, config: MarkdownifyConfig, profile: str | None = None) -> None:
         self.config = config
-        self.profile: PromptProfile = load_prompt_profile(profile or "contracts")
+        self.profile: PromptProfile = load_prompt_profile(profile or DEFAULT_PROFILE)
 
         # Configure logging level
         set_log_level(config.log_level)
@@ -36,6 +36,7 @@ class Markdownifier:
             max_retries=config.max_retries,
             retry_delay=config.retry_delay,
             rate_limit_rpm=config.rate_limit_rpm,
+            llm_kwargs=config.llm_kwargs,
         )
 
         # Configure caching
@@ -46,7 +47,11 @@ class Markdownifier:
 
     def _render_pages(self) -> List[PageImage]:
         return load_document_pages(
-            self.config.input_path, dpi=self.config.dpi, allow_docx=self.config.allow_docx
+            self.config.input_path,
+            dpi=self.config.dpi,
+            allow_docx=self.config.allow_docx,
+            max_side=self.config.max_image_px,
+            image_format=self.config.image_format,
         )
 
     def _group_pages(self, pages: List[PageImage]) -> List[List[PageImage]]:
@@ -88,9 +93,23 @@ class Markdownifier:
                 executor.submit(self._markdown_for_group, group): idx
                 for idx, group in enumerate(groups)
             }
-            for future in tqdm(as_completed(future_to_idx), total=len(groups), desc="LLM groups"):
+            progress = tqdm(
+                as_completed(future_to_idx),
+                total=len(groups),
+                desc="LLM groups",
+                disable=self.config.log_level == "quiet",
+            )
+            for future in progress:
                 idx = future_to_idx[future]
-                md = future.result()
+                try:
+                    md = future.result()
+                except Exception:
+                    # Don't keep paying for the remaining groups when the document will fail.
+                    for pending in future_to_idx:
+                        pending.cancel()
+                    first_page = groups[idx][0].index + 1
+                    logger.error("Conversion failed for the group starting at page %d", first_page)
+                    raise
                 results.append((idx, md))
 
         ordered = [text for _, text in sorted(results, key=lambda t: t[0])]

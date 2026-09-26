@@ -79,3 +79,65 @@ MARKDOWN_USER_PROMPT = (
     "Apply the checklist strictly: '# ' only for concise, title-like integer-numbered sections ('1'/'1.', '12'/'12.'); decimal-numbered items never become headings (even if bold/uppercase/first line); if the text after an integer number reads as a long sentence, keep it as a numbered line; TOC entries are lists; '## ' reserved only for true non-numbered subheadings. \n"
     "Return ONLY the document content in Markdown with no notes, disclaimers, or extra commentary."
 )
+
+
+# General-purpose profile (the default). Tuned for faithful transcription that is ready for
+# RAG/LLM use: exact text, natural reading order, no page furniture, LaTeX math, lossless tables.
+GENERIC_CONTINUATION_SYSTEM_PROMPT = (
+    "You compare two consecutive document pages, A then B, and decide whether a visual structure "
+    "is split across the page break.\n"
+    "Answer CONTINUE_NEXT only if a table, boxed panel, chart or figure at the bottom of page A "
+    "continues at the top of page B (for tables: same columns, header or grid style, even if the "
+    "header is not repeated). Running text, lists and headings continuing onto the next page do "
+    "NOT count. If unsure, answer NONE.\n"
+    "Reply with exactly one word: CONTINUE_NEXT or NONE."
+)
+
+GENERIC_CONTINUATION_USER_PROMPT = (
+    "Page A is the first image, page B the second. Is a table/panel/chart split across the break?"
+)
+
+GENERIC_MARKDOWN_SYSTEM_PROMPT = (
+    "You convert document page images into Markdown that will be read by people and by LLMs "
+    "(search, RAG). Transcribe; do not summarize.\n"
+    "\n"
+    "Text\n"
+    "- Transcribe every piece of body text exactly as printed: same words, spelling, numbers, "
+    "punctuation, capitalization and language. Do not correct, translate, paraphrase or skip.\n"
+    "- Rejoin words hyphenated across line breaks and merge lines of the same paragraph. "
+    "Keep paragraph breaks.\n"
+    "- Follow natural reading order. For multi-column layouts, read each column top to bottom, "
+    "left column first. Place captions, sidebars and footnotes where a reader would read them.\n"
+    "- For scanned, faded or handwritten text, transcribe your best reading; use [illegible] only "
+    "for text you truly cannot read.\n"
+    "\n"
+    "Structure\n"
+    "- Use Markdown headings (#, ##, ###) that mirror the visual heading hierarchy. Keep list "
+    "numbering and bullets as printed. Use **bold**/*italic* only where the page does.\n"
+    "\n"
+    "Leave out page furniture\n"
+    "- Omit running headers and footers, page numbers, journal/volume lines, repeated page "
+    "titles, watermarks, and scanner or printer marks. Keep footnotes.\n"
+    "\n"
+    "Math\n"
+    "- Write every formula in LaTeX: inline as $...$, display equations as $$...$$ on their own "
+    "lines. This includes variables and short expressions inside sentences.\n"
+    "\n"
+    "Tables\n"
+    "- Transcribe every cell exactly. Use a GitHub-Flavored Markdown table for simple grids. If "
+    "the table has merged cells (rowspan/colspan) or multi-level headers, output an HTML <table> "
+    "with rowspan/colspan instead so no structure is lost.\n"
+    "\n"
+    "Figures\n"
+    "- Charts: give a one-line description, then the data values you can read, as a table.\n"
+    "- Diagrams and flowcharts: a Mermaid code block when it captures the structure, otherwise a "
+    "short description.\n"
+    "- Photos, logos and other images: a short description in the form "
+    "![description](image). Transcribe any text that appears inside images.\n"
+    "\n"
+    "Output\n"
+    "- Output only the Markdown for the page content, covering all pages in order. No code fence "
+    "around the whole answer, no notes, no commentary, nothing that is not on the page."
+)
+
+GENERIC_MARKDOWN_USER_PROMPT = "Convert these page images to Markdown."

@@ -6,9 +6,11 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
+
+from .pager import SUPPORTED_SUFFIXES
 
 
 LogLevel = Literal["quiet", "normal", "verbose", "debug"]
@@ -23,10 +25,20 @@ class MarkdownifyConfig(BaseModel):
     output_path: Path = Field(..., description="Path to output Markdown file")
 
     dpi: int = Field(
-        72,
+        200,
         ge=72,
         le=600,
-        description="DPI used to render PDF pages (ignored for direct image inputs)",
+        description="DPI used to render PDF pages (ignored for direct image inputs). "
+        "The rendered image is still capped at max_image_px.",
+    )
+    max_image_px: int = Field(
+        2048,
+        ge=512,
+        le=8192,
+        description="Longest side, in pixels, of every page image sent to the model",
+    )
+    image_format: Literal["jpeg", "png"] = Field(
+        "jpeg", description="Encoding for page images sent to the model"
     )
     max_group_pages: int = Field(3, ge=1, le=10, description="Max pages to group together")
     enable_grouping: bool = Field(True, description="Enable LLM-based grouping")
@@ -41,8 +53,19 @@ class MarkdownifyConfig(BaseModel):
         default_factory=lambda: os.getenv("LLM_MARKDOWNIFY_MODEL", "gpt-4.1-mini"),
         description="LiteLLM model name (e.g., gpt-4.1-mini, azure/<deployment>, gemini/gemini-2.5-flash)",
     )
-    temperature: float = Field(0.1, ge=0.0, le=1)
+    temperature: Optional[float] = Field(
+        None,
+        ge=0.0,
+        le=2.0,
+        description="Sampling temperature. None uses the provider default "
+        "(reasoning models reject custom temperatures)",
+    )
     max_tokens: int = Field(16000, ge=256, le=128000)
+    llm_kwargs: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Extra keyword arguments passed to every LiteLLM completion call "
+        "(e.g. api_base, api_key, reasoning_effort, timeout)",
+    )
 
     concurrency: int = Field(
         4,
@@ -60,7 +83,7 @@ class MarkdownifyConfig(BaseModel):
 
     # Retry configuration
     max_retries: int = Field(
-        3,
+        5,
         ge=0,
         le=10,
         description="Max retry attempts for failed LLM calls",
@@ -101,8 +124,8 @@ class MarkdownifyConfig(BaseModel):
     def _validate_input(cls, path: Path) -> Path:
         if not path.exists():
             raise ValueError(f"Input file not found: {path}")
-        if path.suffix.lower() not in {".pdf", ".docx", ".png", ".jpg", ".jpeg"}:
-            raise ValueError("input_path must be a .pdf, .docx, .png, .jpg, or .jpeg file")
+        if path.suffix.lower() not in SUPPORTED_SUFFIXES:
+            raise ValueError(f"input_path must be one of: {', '.join(sorted(SUPPORTED_SUFFIXES))}")
         return path
 
     @field_validator("output_path")

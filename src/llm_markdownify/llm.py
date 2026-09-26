@@ -5,18 +5,20 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import os
+import re
 import threading
 import time
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from tenacity import (
-    retry,
-    retry_if_exception_type,
-    stop_after_attempt,
-    wait_exponential,
     before_sleep_log,
+    retry,
+    retry_if_exception,
+    stop_after_attempt,
+    wait_random_exponential,
 )
 
 from .cache import get_cache
@@ -41,113 +43,155 @@ for logger_name in ("LiteLLM", "litellm", "litellm.proxy", "apscheduler"):
 logger = get_logger("llm_markdownify.llm")
 
 
-# Rate limiter state
+class EmptyResponseError(RuntimeError):
+    """The model returned no content (e.g. all tokens spent on reasoning). Retried."""
+
+
 class RateLimiter:
-    """Simple token bucket rate limiter for requests per minute."""
+    """Token bucket limiting requests per minute.
+
+    Each caller reserves a slot under the lock before sleeping, so concurrent waiters are spread
+    out instead of all waking at once. The bucket holds about one second of requests.
+    """
 
     def __init__(self, rpm: Optional[int] = None) -> None:
         self.rpm = rpm
         self.lock = threading.Lock()
-        self.tokens = float(rpm) if rpm else float("inf")
+        self.rate = (rpm / 60.0) if rpm else float("inf")
+        self.capacity = max(1.0, self.rate) if rpm else float("inf")
+        self.tokens = self.capacity
         self.last_refill = time.monotonic()
 
     def acquire(self) -> None:
         """Block until a request slot is available."""
         if self.rpm is None:
             return
-
         with self.lock:
             now = time.monotonic()
-            elapsed = now - self.last_refill
-            # Refill tokens based on elapsed time
-            self.tokens = min(float(self.rpm), self.tokens + elapsed * (self.rpm / 60.0))
+            self.tokens = min(self.capacity, self.tokens + (now - self.last_refill) * self.rate)
             self.last_refill = now
-
-            if self.tokens >= 1.0:
-                self.tokens -= 1.0
-                return
-
-            # Calculate wait time
-            wait_time = (1.0 - self.tokens) / (self.rpm / 60.0)
-
-        logger.debug("Rate limit: waiting %.2fs", wait_time)
-        time.sleep(wait_time)
-
-        with self.lock:
-            self.tokens = 0.0
-            self.last_refill = time.monotonic()
+            self.tokens -= 1.0  # reserve; may go negative, which queues later callers further out
+            wait_time = 0.0 if self.tokens >= 0 else -self.tokens / self.rate
+        if wait_time > 0:
+            logger.debug("Rate limit: waiting %.2fs", wait_time)
+            time.sleep(wait_time)
 
 
 # Global rate limiter and retry config (configured at runtime)
 _rate_limiter: Optional[RateLimiter] = None
-_max_retries: int = 3
+_max_retries: int = 5
 _retry_delay: float = 1.0
+_llm_kwargs: dict[str, Any] = {}
 
 
 def configure_llm(
-    max_retries: int = 3,
+    max_retries: int = 5,
     retry_delay: float = 1.0,
     rate_limit_rpm: Optional[int] = None,
+    llm_kwargs: Optional[dict[str, Any]] = None,
 ) -> None:
-    """Configure retry and rate limiting behavior."""
-    global _rate_limiter, _max_retries, _retry_delay
+    """Configure retry, rate limiting and extra provider kwargs (api_base, reasoning_effort...)."""
+    global _rate_limiter, _max_retries, _retry_delay, _llm_kwargs
     _max_retries = max_retries
     _retry_delay = retry_delay
     _rate_limiter = RateLimiter(rate_limit_rpm) if rate_limit_rpm else None
+    _llm_kwargs = dict(llm_kwargs or {})
     logger.debug(
-        "LLM configured: max_retries=%d, retry_delay=%.1fs, rpm=%s",
+        "LLM configured: max_retries=%d, retry_delay=%.1fs, rpm=%s, extra=%s",
         max_retries,
         retry_delay,
         rate_limit_rpm,
+        sorted(_llm_kwargs),
     )
 
 
 def _hash_content(content: str) -> str:
-    """Create a short hash of content for caching."""
-    return hashlib.sha256(content.encode("utf-8")).hexdigest()[:12]
+    """Full sha256 of content, used for cache keys."""
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+def _is_retryable(exc: BaseException) -> bool:
+    """Retry transient failures only. Auth, bad-request and not-found errors fail fast."""
+    if isinstance(exc, EmptyResponseError):
+        return True
+    import litellm  # type: ignore
+
+    transient = (
+        litellm.RateLimitError,
+        litellm.APIConnectionError,
+        litellm.Timeout,
+        litellm.InternalServerError,
+        litellm.ServiceUnavailableError,
+    )
+    return isinstance(exc, transient)
 
 
 def _completion_with_retry(
-    *, model: str, messages: list, temperature: float, max_tokens: int | None
-):
-    """Execute LLM completion with retry logic."""
+    *, model: str, messages: list, temperature: float | None, max_tokens: int | None
+) -> tuple[str, str | None]:
+    """Run one completion with retries. Returns (content, finish_reason)."""
     # Local import to allow env configuration above to take effect
-    import litellm  # type: ignore
     from litellm import completion as _litellm_completion  # type: ignore
 
-    # Drop unsupported params for strict models
-    try:
-        litellm.drop_params = True  # type: ignore[attr-defined]
-    except Exception:
-        pass
-
-    # Apply rate limiting
-    if _rate_limiter:
-        _rate_limiter.acquire()
-
-    # Build retry decorator dynamically based on config
     @retry(
-        retry=retry_if_exception_type((Exception,)),
+        retry=retry_if_exception(_is_retryable),
         stop=stop_after_attempt(_max_retries + 1),  # +1 because first attempt isn't a retry
-        wait=wait_exponential(multiplier=_retry_delay, min=_retry_delay, max=60),
+        wait=wait_random_exponential(multiplier=_retry_delay, max=60),
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
-    def _do_completion():
-        kwargs = {"model": model, "messages": messages, "temperature": temperature}
+    def _do_completion() -> tuple[str, str | None]:
+        if _rate_limiter:
+            _rate_limiter.acquire()  # every attempt counts against the limit, retries included
+        kwargs: dict[str, Any] = {"model": model, "messages": messages, "drop_params": True}
+        if temperature is not None:
+            kwargs["temperature"] = temperature
         if max_tokens is not None:
             kwargs["max_tokens"] = max_tokens
-        return _litellm_completion(**kwargs)
+        kwargs.update(_llm_kwargs)
+        resp = _litellm_completion(**kwargs)
+        choice = resp["choices"][0]
+        content = choice["message"]["content"]
+        if not content or not str(content).strip():
+            raise EmptyResponseError(
+                f"Model returned empty content (finish_reason={choice.get('finish_reason')})"
+            )
+        return str(content), choice.get("finish_reason")
 
     return _do_completion()
 
 
 def _message_with_images(text: str, image_data_urls: List[str]) -> dict:
     """Build a message dict with text and images."""
-    content = [{"type": "text", "text": text}]
+    content: list[dict[str, Any]] = [{"type": "text", "text": text}]
     for url in image_data_urls:
         content.append({"type": "image_url", "image_url": {"url": url}})
     return {"role": "user", "content": content}
+
+
+_FENCE_RE = re.compile(r"^\s*```(?:markdown|md)?[ \t]*\n(.*?)\n?```\s*$", re.DOTALL | re.IGNORECASE)
+
+
+def strip_markdown_fence(text: str) -> str:
+    """Remove a single fence wrapping the whole response (models often add ```markdown ... ```)."""
+    match = _FENCE_RE.match(text)
+    return match.group(1) if match else text
+
+
+def parse_continuation_label(text: str) -> str:
+    """Map a free-form model answer to CONTINUE_NEXT or NONE."""
+    normalized = text.strip().upper().replace(" ", "_")
+    return "CONTINUE_NEXT" if "CONTINUE" in normalized else "NONE"
+
+
+def _request_key(model: str, messages: list, **params: Any) -> str:
+    """Stable hash of everything that affects the model's answer."""
+    payload = json.dumps(
+        {"model": model, "messages": messages, "params": params, "extra": _llm_kwargs},
+        sort_keys=True,
+        default=str,
+    )
+    return _hash_content(payload)
 
 
 def assess_continuation(
@@ -163,19 +207,19 @@ def assess_continuation(
         _message_with_images(profile.continuation_user, images),
     ]
 
-    # Check cache
     cache = get_cache()
-    prompt_hash = _hash_content(profile.continuation_system + profile.continuation_user)
-    image_hashes = [_hash_content(url) for url in images]
-    cached = cache.get(model, prompt_hash, image_hashes)
-    if cached:
+    key = _request_key(model, messages, task="continuation")
+    cached = cache.get(model, key, [])
+    if cached is not None:
         return cached
 
-    resp = _completion_with_retry(model=model, messages=messages, temperature=0.0, max_tokens=4)
-    result = str(resp["choices"][0]["message"]["content"]).strip().upper()
-
-    # Cache result
-    cache.set(model, prompt_hash, image_hashes, result)
+    # No max_tokens cap: reasoning models spend tokens thinking before answering, and a tiny
+    # cap leaves them with an empty answer.
+    content, _ = _completion_with_retry(
+        model=model, messages=messages, temperature=None, max_tokens=None
+    )
+    result = parse_continuation_label(content)
+    cache.set(model, key, [], result)
     return result
 
 
@@ -183,8 +227,8 @@ def generate_markdown(
     model: str,
     image_data_urls: List[str],
     profile: PromptProfile,
-    temperature: float = 0.2,
-    max_tokens: int = 2000,
+    temperature: float | None = None,
+    max_tokens: int | None = None,
 ) -> str:
     """Generate markdown from page images."""
     messages = [
@@ -192,20 +236,22 @@ def generate_markdown(
         _message_with_images(profile.markdown_user, image_data_urls),
     ]
 
-    # Check cache
     cache = get_cache()
-    prompt_hash = _hash_content(profile.markdown_system + profile.markdown_user)
-    image_hashes = [_hash_content(url) for url in image_data_urls]
-    cached = cache.get(model, prompt_hash, image_hashes)
-    if cached:
+    key = _request_key(model, messages, temperature=temperature, max_tokens=max_tokens)
+    cached = cache.get(model, key, [])
+    if cached is not None:
         logger.info("Using cached markdown response")
         return cached
 
-    resp = _completion_with_retry(
+    content, finish_reason = _completion_with_retry(
         model=model, messages=messages, temperature=temperature, max_tokens=max_tokens
     )
-    result = str(resp["choices"][0]["message"]["content"]).strip()
-
-    # Cache result
-    cache.set(model, prompt_hash, image_hashes, result)
+    if finish_reason == "length":
+        logger.warning(
+            "Model output was truncated at max_tokens; the Markdown for this group is incomplete. "
+            "Raise --max-tokens or lower --max-group-pages."
+        )
+    result = strip_markdown_fence(content).strip()
+    if finish_reason != "length":  # never cache a truncated answer
+        cache.set(model, key, [], result)
     return result
