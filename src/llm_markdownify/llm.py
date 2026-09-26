@@ -14,10 +14,10 @@ import time
 from typing import Any, List, Optional
 
 from tenacity import (
+    RetryCallState,
     before_sleep_log,
     retry,
     retry_if_exception,
-    stop_after_attempt,
     wait_random_exponential,
 )
 
@@ -83,6 +83,10 @@ _max_retries: int = 5
 _retry_delay: float = 1.0
 _llm_kwargs: dict[str, Any] = {}
 
+# Rate limits clear with time, so they get a time budget instead of an attempt count. This keeps a
+# page alive while another job saturates the same key's tokens-per-minute quota.
+RATE_LIMIT_BUDGET_S = 180.0
+
 
 def configure_llm(
     max_retries: int = 5,
@@ -126,6 +130,15 @@ def _is_retryable(exc: BaseException) -> bool:
     return isinstance(exc, transient)
 
 
+def _stop_retrying(state: RetryCallState) -> bool:
+    import litellm  # type: ignore
+
+    exc = state.outcome.exception() if state.outcome else None
+    if isinstance(exc, litellm.RateLimitError):
+        return state.seconds_since_start >= RATE_LIMIT_BUDGET_S
+    return state.attempt_number > _max_retries  # first attempt isn't a retry
+
+
 def _completion_with_retry(
     *, model: str, messages: list, temperature: float | None, max_tokens: int | None
 ) -> tuple[str, str | None]:
@@ -135,8 +148,8 @@ def _completion_with_retry(
 
     @retry(
         retry=retry_if_exception(_is_retryable),
-        stop=stop_after_attempt(_max_retries + 1),  # +1 because first attempt isn't a retry
-        wait=wait_random_exponential(multiplier=_retry_delay, max=60),
+        stop=_stop_retrying,
+        wait=wait_random_exponential(multiplier=_retry_delay, max=30),
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )

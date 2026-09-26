@@ -26,3 +26,5 @@ htmlcov/
 .pytest_cache/
 
 test_files/
+# Eval data (downloaded, ODC-BY)
+evals/olmocr_bench/data/

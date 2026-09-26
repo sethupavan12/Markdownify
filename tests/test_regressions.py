@@ -253,3 +253,30 @@ def test_default_profile_is_generic():
 
     assert DEFAULT_PROFILE == "generic"
     assert "LaTeX" in load_prompt_profile(DEFAULT_PROFILE).markdown_system
+
+
+def test_rate_limits_retry_on_a_time_budget_not_attempts(monkeypatch):
+    """A shared key's TPM quota can stay saturated past max_retries; keep trying within the budget."""
+    calls = []
+
+    def fake_completion(**kwargs):
+        calls.append(1)
+        if len(calls) < 6:  # more failures than max_retries=2
+            raise litellm.RateLimitError("slow down", llm_provider="openai", model="m")
+        return _response("# eventually")
+
+    monkeypatch.setattr(litellm, "completion", fake_completion)
+    monkeypatch.setattr(llm, "RATE_LIMIT_BUDGET_S", 30.0)
+    llm.configure_llm(max_retries=2, retry_delay=0.01)
+    assert llm.generate_markdown("m", ["data:a"], load_prompt_profile("generic")) == "# eventually"
+
+
+def test_rate_limit_budget_is_enforced(monkeypatch):
+    def fake_completion(**kwargs):
+        raise litellm.RateLimitError("slow down", llm_provider="openai", model="m")
+
+    monkeypatch.setattr(litellm, "completion", fake_completion)
+    monkeypatch.setattr(llm, "RATE_LIMIT_BUDGET_S", 0.2)
+    llm.configure_llm(max_retries=2, retry_delay=0.01)
+    with pytest.raises(litellm.RateLimitError):
+        llm.generate_markdown("m", ["data:a"], load_prompt_profile("generic"))
