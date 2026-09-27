@@ -25,9 +25,13 @@ Ablations on the same subset (phase 1 code, one change each):
 | `max_image_px=1536` | 81.9 | 34% fewer prompt tokens, loses about 3 points, mostly old scans |
 | `gpt-5.6-luna` | 82.8 | best on tables (93.2), weaker on old math |
 
+Full benchmark (all 1,403 pages, 8,413 tests), 0.5.0 + `gpt-6-luna`: **81.6 ± 1.0** (arXiv math 79.4,
+headers/footers 86.6, tiny text 88.7, multi-column 81.4, old scans 45.1, old scans math 82.5, tables
+89.1). 1 of 1,403 pages failed, a blank page, fixed in 0.5.0. Same model with a bare prompt on the
+subset: 72.6.
+
 For scale, published full-benchmark numbers on the same harness family: Marker 2 balanced 76.0,
-olmOCR 2 82.4, Mistral OCR 4 85.2 (claimed), Chandra 2 85.9, GPT-5.4 used raw 81.0. Our number is on a
-subset, so it is indicative until the full run in phase 2.
+olmOCR 2 82.4, Mistral OCR 4 85.2 (claimed), Chandra 2 85.9, GPT-5.4 used raw 81.0. The subset over-states the full score by about 3 points.
 
 ## Phase 1 - Reliability and accuracy (done, branch `modernize-phase1`)
 
