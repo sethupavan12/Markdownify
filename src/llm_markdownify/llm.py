@@ -181,6 +181,10 @@ def _completion_with_retry(
         choice = resp["choices"][0]
         content = choice["message"]["content"]
         if not content or not str(content).strip():
+            if choice.get("finish_reason") == "stop":
+                # The model finished normally with nothing to say: a blank page, or one holding
+                # only headers/footers we asked it to drop. That is a correct answer, not a failure.
+                return "", "stop"
             if choice.get("finish_reason") == "length":
                 raise OutputBudgetExhaustedError(
                     "The model used its whole output budget without answering (usually on "

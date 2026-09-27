@@ -1,162 +1,174 @@
-## Markdownify
+# llm-markdownify
 
-Mardownify is a super easy-to-use PDF/image to high-quality Markdown converter using Vision LLMs. It supports text, images, signatures, tables, charts, flowcharts and preserves document structure (Headings, numbered lists etc).
+[![PyPI](https://img.shields.io/pypi/v/llm-markdownify)](https://pypi.org/project/llm-markdownify/)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+[![CI](https://github.com/sethupavan12/Markdownify/actions/workflows/ci.yml/badge.svg)](https://github.com/sethupavan12/Markdownify/actions/workflows/ci.yml)
 
-Tables become Markdown tables, charts become Mermaid diagrams, and images get concise summaries. Use as a CLI or Python library. Works with 100+ LLMs. Recommended to use with `gpt-5-mini` or `gpt-4.1-mini` or even better models for better performance. The best part is you have complete control over what gets rendered how!
+Turn PDFs, scans and images into clean Markdown with the vision model you already pay for.
+Built for RAG pipelines and AI agents.
 
-If you don't believe it there's a whole gallery of examples with really wide range of OCR tasks you can explore here -> [Gallery](https://github.com/sethupavan12/Markdownify/blob/main/examples/gallery.md) 
+```bash
+pip install llm-markdownify
+markdownify report.pdf -o report.md --model gpt-5.4-mini
+```
+
+Each page goes to a vision LLM with a prompt we measure on a public benchmark, so the Markdown comes
+back the way a retriever or an agent wants it:
+
+- the text exactly as printed, in reading order, including multi-column layouts
+- no running headers, footers or page numbers polluting your chunks
+- math as LaTeX (`$...$`, `$$...$$`)
+- tables as Markdown, or as HTML when they have merged cells, and stitched back together when they
+  break across pages
+- charts as a description plus the data values, diagrams as Mermaid
+- old scans and handwriting transcribed, not summarized
+
+It works with any provider: OpenAI, Anthropic, Gemini, DeepSeek, Azure, OpenRouter, or a model running
+on your own machine through Ollama, LM Studio or vLLM.
 
 ![Handwritten notes converted to Markdown](examples/image.png)
 
-<img width="1867" height="450" alt="image" src="https://github.com/user-attachments/assets/9a8b5176-03d8-4063-a8f3-4b1e52bdbe72" />
+## How good is it?
 
-### Install
+We measure every change on [olmOCR-Bench](https://huggingface.co/datasets/allenai/olmOCR-bench), the
+benchmark most PDF-to-Markdown tools publish. It checks 1,403 real pages with about 7,000 pass/fail
+tests: is this sentence present, is the page footer gone, is paragraph A before paragraph B, is this
+table cell next to that one, does this equation render the same.
+
+**llm-markdownify 0.5 with `gpt-6-luna` scores 81.6 ± 1.0 on the full benchmark.**
+
+| System | olmOCR-Bench | Source |
+|---|---|---|
+| Chandra 2 | 85.9 | [Datalab](https://huggingface.co/datalab-to/chandra-ocr-2) (self-reported) |
+| Mistral OCR 4 | 85.2 | [Mistral](https://mistral.ai/news/ocr-4/) (self-reported) |
+| olmOCR 2 (7B model trained for this benchmark) | 82.4 | [Ai2](https://github.com/allenai/olmocr) |
+| **llm-markdownify 0.5 + gpt-6-luna** | **81.6** | measured with [`evals/olmocr_bench`](evals/olmocr_bench) |
+| Marker 2 (balanced) | 76.0 | [Datalab](https://github.com/datalab-to/marker) (self-reported) |
+| Docling | 50.3 | [Marker's benchmark](https://github.com/datalab-to/marker) |
+
+By category: tables 89.1, headers/footers 86.6, old scans with math 82.5, multi-column 81.4, arXiv
+math 79.4, tiny text 88.7, old scans 45.1. Old, faded scans are the weak spot.
+
+What the library adds on top of the model, measured on a fixed 105-page stratified subset:
+
+| Same pages | Score | Median time per page |
+|---|---|---|
+| `gpt-6-luna` with a bare "convert this page to Markdown" prompt | 72.6 | 11.9 s |
+| llm-markdownify 0.4 + `gpt-6-luna` | 72.5 (18 pages failed) | 14.8 s |
+| llm-markdownify 0.5 + `gpt-5.4-mini` | 80.4 | 4.8 s |
+| llm-markdownify 0.5 + `gpt-6-luna` | 84.9 | 14.6 s |
+
+The biggest single difference is headers and footers. With the bare prompt, 24% of the checks that
+running headers, footers and page numbers are gone pass (88% with llm-markdownify). Left in, that
+furniture ends up in every RAG chunk. Other projects' numbers are what they
+published; ours come from running the benchmark's own scorer on our output.
+
+Reproduce it yourself with [`evals/olmocr_bench`](evals/olmocr_bench). The harness scores the Markdown
+this library writes, through the same `convert()` call you would use.
+
+## Quickstart
+
 ```bash
-uv pip install llm-markdownify
-# or
-pip install llm-markdownify
+export OPENAI_API_KEY="sk-..."
+
+markdownify input.pdf -o output.md --model gpt-5.4-mini   # PDF
+markdownify scan.png -o scan.md --model gpt-5.4-mini      # PNG, JPG, WEBP, TIFF (multi-page), BMP, GIF
 ```
 
-### Quickstart (CLI)
-```bash
-# Set OpenAI key as env var
-export OPENAI_API_KEY="sk-.."
-# PDF input
-markdownify input.pdf -o output.md --model gpt-5-mini
+From Python:
 
-# Or single image input (PNG/JPG/JPEG)
-markdownify input.png -o output.md --model gpt-5-mini
-```
-
-### Features
-- High-quality complex markdown generation powered by LLMs. 
-- Supports Text, Images, Tables, Charts.
-- Built-in prompts tuned for clean Markdown, Mermaid, and structured headings along with ability to customise.
-- Supports multi-page tables, charts and images.
-- High-fidelity page rendering from PDF.
-- Optional DOCX→PDF conversion using MS word installation.
-- Works seamlessly with 100+ LLMs with LiteLLM Intergration.
-
-### Python API (one-liner)
 ```py
 from llm_markdownify import convert
 
-convert(
-    "input.pdf",  # or an image path like "input.png"
-    "output.md",
-    model="gpt-5-mini",   # optional; can rely on env/provider defaults
-    profile="generic",    # default; or "contracts", or a path to a JSON profile
-)
+convert("input.pdf", "output.md", model="gpt-5.4-mini")
 ```
 
-Optional DOCX support (macOS/Windows via Word):
+## Use any provider
+
+The model name decides where the request goes (via [LiteLLM](https://docs.litellm.ai/docs/providers),
+100+ providers). Set that provider's key and pick a vision-capable model.
+
+| Provider | Key | Example `--model` |
+|---|---|---|
+| OpenAI | `OPENAI_API_KEY` | `gpt-5.4-mini` |
+| Anthropic | `ANTHROPIC_API_KEY` | `anthropic/claude-sonnet-5` |
+| Google Gemini | `GEMINI_API_KEY` | `gemini/gemini-2.5-flash` |
+| DeepSeek | `DEEPSEEK_API_KEY` | `deepseek/deepseek-flash` |
+| OpenRouter | `OPENROUTER_API_KEY` | `openrouter/anthropic/claude-sonnet-5` |
+| Azure OpenAI | `AZURE_API_KEY`, `AZURE_API_BASE`, `AZURE_API_VERSION` | `azure/<deployment>` |
+
+Anything that speaks the OpenAI API works too, including local servers with no key at all:
+
 ```bash
-pip install llm-markdownify[docx]
+# Ollama, LM Studio, vLLM, llama.cpp, or a hosted OpenAI-compatible provider
+markdownify input.pdf -o output.md --model openai/<model-name> --api-base http://localhost:11434/v1
 ```
 
-### Configure your provider (via LiteLLM)
-Pick one of the following. See the full providers list and details in the LiteLLM docs: [Supported Providers](https://docs.litellm.ai/docs/providers).
+## Built for production
 
-- **OpenAI**
-  - Set your API key:
-    ```bash
-    export OPENAI_API_KEY="sk-..."
-    ```
-  - Example usage:
-    ```bash
-    markdownify input.pdf -o output.md --model gpt-5-mini
-    ```
+- **Safe to call from threads.** Use `convert()` from a web server or a worker pool. (Retry, cache and
+  rate-limit settings are currently process-wide, so give concurrent calls the same settings.)
+- **Rate limits are waited out, real errors fail fast.** Rate limits, timeouts and 5xx responses are
+  retried with backoff. A bad key or a bad request fails on the first attempt with one clear line,
+  and never prints your API key.
+- **Oversized pages are handled.** Page images are capped at 2048 px, below provider limits, so big
+  scans don't get rejected.
+- **Re-runs are free** with `--cache`: responses are cached on disk and keyed on the exact request.
+- **Throughput and cost controls:** `--concurrency`, `--rate-limit`, `--max-image-px`,
+  `--reasoning-effort`.
 
-- **Google Gemini**
-  - Set your API key (Google AI Studio key):
-    ```bash
-    export GEMINI_API_KEY="..."
-    ```
-  - Example usage (pick a Gemini vision-capable model):
-    ```bash
-    markdownify input.pdf -o output.md --model gemini/gemini-2.5-flash
-    ```
+## Options
 
-- **OpenRouter**
-  - Set your API key (OpenRouter API Key):
-    ```bash
-    export OPENROUTER_API_KEY="..."
-    ```
-  - Example usage (pick a Gemini vision-capable model):
-    ```bash
-    markdownify input.pdf -o output.md --model openrouter/z-ai/glm-4.5v
-    ```
-- **Anthropic (Claude)**
-  ```bash
-  export ANTHROPIC_API_KEY="..."
-  markdownify input.pdf -o output.md --model anthropic/claude-sonnet-5
-  ```
+| Flag | Default | What it does |
+|---|---|---|
+| `--model` | `gpt-4.1-mini` or `$LLM_MARKDOWNIFY_MODEL` | any LiteLLM model name |
+| `--profile` | `generic` | prompt profile: `generic`, `contracts`, or a JSON file with your own prompts |
+| `--dpi` | 200 | PDF render resolution (ignored for images) |
+| `--max-image-px` | 2048 | longest side of each page image sent to the model |
+| `--max-group-pages` | 3 | max pages merged when a table or chart continues onto the next page |
+| `--no-grouping` | | skip cross-page detection (one fewer model call per page) |
+| `--temperature`, `--max-tokens`, `--reasoning-effort` | provider defaults, 16000 | generation settings |
+| `--api-base` | | any OpenAI-compatible endpoint |
+| `--concurrency`, `--grouping-concurrency`, `--rate-limit` | 4, same, none | throughput |
+| `--cache`, `--cache-dir` | off, `~/.cache/llm-markdownify` | response cache |
+| `-q`, `-v`, `--version` | | quiet, verbose, version |
 
-- **DeepSeek**
-  ```bash
-  export DEEPSEEK_API_KEY="..."
-  markdownify input.pdf -o output.md --model deepseek/deepseek-flash
-  ```
+Custom prompts: copy a built-in profile from
+[`prompt_profiles.py`](src/llm_markdownify/prompt_profiles.py) into a JSON file with the fields `name`,
+`continuation_system`, `continuation_user`, `markdown_system` and `markdown_user`, then pass
+`--profile my_profile.json`.
 
-- **Azure OpenAI**
-  - Set these environment variables (values from your Azure OpenAI resource):
-    ```bash
-    export AZURE_API_KEY="..."
-    export AZURE_API_BASE="https://<your-resource>.openai.azure.com"
-    export AZURE_API_VERSION=""
-    ```
-  - Use your deployment name via the `azure/<deployment_name>` model syntax:
-    ```bash
-    markdownify input.pdf -o output.md --model azure/<deployment_name>
-    ```
-  - See: [LiteLLM Azure OpenAI](https://docs.litellm.ai/docs/providers/azure/#overview)
+DOCX input goes through Microsoft Word (macOS/Windows): `pip install "llm-markdownify[docx]"` and pass
+`--allow-docx`. Exporting to PDF yourself is more reliable.
 
-- **OpenAI-compatible APIs**
-  - Many providers expose an OpenAI-compatible REST API. Set your API key and base URL:
-    ```bash
-    export OPENAI_API_KEY="..."
-    export OPENAI_API_BASE="https://your-openai-compatible-endpoint.com/v1"
-    ```
-  - Use the model name supported by that endpoint, prefixed with `openai/`, or pass the URL per run:
-    ```bash
-    markdownify input.pdf -o output.md --model openai/<model-name> --api-base https://your-endpoint/v1
-    ```
-  - The same works for local servers (Ollama, LM Studio, vLLM, llama.cpp) with no API key.
-  - Reference: [LiteLLM Providers](https://docs.litellm.ai/docs/providers)
+## Examples
 
-For additional providers and advanced configuration (fallbacks, cost tracking, streaming), see the LiteLLM docs: [Getting Started](https://docs.litellm.ai/).
+The [gallery](examples/gallery.md) has about 80 inputs with their Markdown output: receipts, charts,
+handwriting, formulas, forms, screenshots, scene text.
 
-### Configuration flags
-- `--model`: LiteLLM model (e.g., `gpt-5-mini`, `azure/<deployment>`, `gemini/gemini-2.5-flash`)
-- `--profile`: prompt profile, `generic` (default), `contracts`, or a path to a JSON profile
-- `--dpi`: PDF render DPI (default 200). Ignored for image inputs.
-- `--max-image-px`: longest side of each page image sent to the model (default 2048)
-- `--max-group-pages`: max pages to merge when a table or chart continues across pages (default 3)
-- `--no-grouping`: disable LLM-based detection of content continuing across pages
-- `--temperature`, `--max-tokens`, `--reasoning-effort`: generation parameters
-- `--api-base`: point at any OpenAI-compatible server (vLLM, Ollama, LM Studio)
-- `--concurrency`, `--grouping-concurrency`, `--rate-limit`: throughput controls
-- `--cache`: cache LLM responses on disk so re-runs are free
+## Roadmap
+
+Next up: an in-memory API that returns per-page results, stdout output and page ranges for agents, an
+MCP server, a hybrid mode that uses the PDF's own text layer to cut cost, and presets for small local
+models. Details and current numbers are in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Markdownify Cloud
-If you’d like to run Markdownify in production with advanced features, on your own infrastructure, using your own LLMs, or tailored to your specific use case, visit [markdownify.xyz ](https://www.markdownify.xyz/) to explore our cloud offering and get in touch.
 
-Markdownify Cloud gives you access to better version of Markdownify that gives better results than the open-source version, with additional features and hands-on support to help you integrate it into your workflow.
+To run Markdownify in production on your own infrastructure, with your own LLMs, or tuned for your
+documents, see [markdownify.xyz](https://www.markdownify.xyz/). The cloud version adds features beyond
+the open-source library and comes with hands-on integration support.
 
-### Attribution & License
-This project uses the Apache 2.0 License, which includes an attribution/NOTICE requirement. If you distribute or use this project, please keep the `LICENSE` and `NOTICE` files intact, crediting the original author, Sethu Pavan Venkata Reddy Pastula.
+## Contributing
 
-- Project repository: https://github.com/sethupavan12/Markdownify
+```bash
+uv sync --all-extras --dev
+uv run pytest
+uv run ruff check src tests
+```
 
-### Development
-- Requires Python 3.10+
-- Use `uv` for fast installs: `uv sync`
-- Run tests: `pytest`
-- Lint: `ruff check src tests`
+See [CONTRIBUTING.md](CONTRIBUTING.md). Maintainers and coding agents: start with [AGENTS.md](AGENTS.md).
 
-Check [CONTRIBUTING.md](CONTRIBUTING.md) for more details
+## License
 
-### Releasing
-GitHub Actions are configured to:
-- Run tests on PRs/pushes
-- Build & publish to PyPI on tagged releases
+Apache 2.0. If you distribute this project, keep the `LICENSE` and `NOTICE` files intact, crediting
+the original author, Sethu Pavan Venkata Reddy Pastula.

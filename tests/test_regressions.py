@@ -118,7 +118,7 @@ def test_empty_content_is_retried_then_fails(monkeypatch):
 
     def fake_completion(**kwargs):
         calls.append(1)
-        return _response(None, "stop")
+        return _response(None, None)
 
     monkeypatch.setattr(litellm, "completion", fake_completion)
     with pytest.raises(llm.EmptyResponseError):
@@ -127,7 +127,7 @@ def test_empty_content_is_retried_then_fails(monkeypatch):
 
 
 def test_empty_content_recovers_on_retry(monkeypatch):
-    answers = iter([_response(""), _response("```markdown\n# ok\n```")])
+    answers = iter([_response("", None), _response("```markdown\n# ok\n```")])
     monkeypatch.setattr(litellm, "completion", lambda **kw: next(answers))
     assert llm.generate_markdown("m", ["data:a"], load_prompt_profile("generic")) == "# ok"
 
@@ -325,3 +325,17 @@ def test_cache_key_ignores_transport_only_kwargs():
     assert llm._request_key("m", []) == key_a
     llm.configure_llm(llm_kwargs={"reasoning_effort": "high"})
     assert llm._request_key("m", []) != key_a
+
+
+def test_blank_page_returns_empty_markdown_without_retrying(monkeypatch):
+    """A page with only a running header and page number correctly yields nothing. It used to be
+    retried 5 times and then fail the whole document (seen on olmOCR-Bench headers_footers)."""
+    calls = []
+
+    def fake_completion(**kwargs):
+        calls.append(1)
+        return _response("", "stop")
+
+    monkeypatch.setattr(litellm, "completion", fake_completion)
+    assert llm.generate_markdown("m", ["data:a"], load_prompt_profile("generic")) == ""
+    assert len(calls) == 1
