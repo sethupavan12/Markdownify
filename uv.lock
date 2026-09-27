@@ -935,6 +935,7 @@ version = "0.5.0"
 source = { editable = "." }
 dependencies = [
     { name = "litellm" },
+    { name = "openai" },
     { name = "pillow" },
     { name = "pydantic" },
     { name = "pypdfium2" },
@@ -966,6 +967,7 @@ dev = [
 requires-dist = [
     { name = "docx2pdf", marker = "extra == 'docx'", specifier = ">=0.1.8" },
     { name = "litellm", specifier = ">=1.100,<2" },
+    { name = "openai", specifier = ">=2.0,<3" },
     { name = "pillow", specifier = ">=10.3.0" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=3.6.0" },
     { name = "pydantic", specifier = ">=2.7.0" },
