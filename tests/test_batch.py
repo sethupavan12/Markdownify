@@ -17,13 +17,18 @@ from llm_markdownify import batch
 class FakeOpenAI:
     """In-memory stand-in for the OpenAI files + batches APIs."""
 
-    def __init__(self, fail_ids: set[str] | None = None):
+    def __init__(self, fail_ids: set[str] | None = None, blank_ids: set[str] | None = None):
         self.uploads: dict[str, list[dict]] = {}
         self.batch_store: dict[str, SimpleNamespace] = {}
         self.fail_ids = set(fail_ids or ())
+        self.blank_ids = set(blank_ids or ())
+        self.reject_next = False  # next finish_all rejects the batch as a whole
+        self.crash_on_create = False
         self.contents: dict[str, str] = {}
         self.files = SimpleNamespace(create=self._create_file, content=self._content)
-        self.batches = SimpleNamespace(create=self._create_batch, retrieve=self._retrieve)
+        self.batches = SimpleNamespace(
+            create=self._create_batch, retrieve=self._retrieve, list=self._list
+        )
 
     def _create_file(self, file, purpose):
         assert purpose == "batch"
@@ -37,26 +42,40 @@ class FakeOpenAI:
         self.batch_store[batch_id] = SimpleNamespace(
             id=batch_id,
             status="in_progress",
-            input=input_file_id,
+            input_file_id=input_file_id,
+            metadata=metadata,
+            errors=None,
             output_file_id=None,
             error_file_id=None,
             request_counts=SimpleNamespace(
                 total=len(self.uploads[input_file_id]), completed=0, failed=0
             ),
         )
+        if self.crash_on_create:  # the batch exists server-side, but the caller never hears back
+            self.crash_on_create = False
+            raise KeyboardInterrupt
         return self.batch_store[batch_id]
+
+    def _list(self, limit=20):
+        return list(self.batch_store.values())
 
     def finish_all(self):
         for b in self.batch_store.values():
             if b.status != "in_progress":
                 continue
             ok, err = [], []
-            for req in self.uploads[b.input]:
+            if self.reject_next:
+                self.reject_next = False
+                b.status = "failed"
+                b.errors = SimpleNamespace(data=[SimpleNamespace(message="invalid model")])
+                continue
+            for req in self.uploads[b.input_file_id]:
                 cid = req["custom_id"]
                 if cid in self.fail_ids:
                     err.append({"custom_id": cid, "error": {"message": "boom"}})
                     self.fail_ids.discard(cid)  # succeeds when retried
                 else:
+                    text = "" if cid in self.blank_ids else f"```markdown\n# {cid}\n```"
                     ok.append(
                         {
                             "custom_id": cid,
@@ -65,7 +84,7 @@ class FakeOpenAI:
                                 "body": {
                                     "choices": [
                                         {
-                                            "message": {"content": f"```markdown\n# {cid}\n```"},
+                                            "message": {"content": text},
                                             "finish_reason": "stop",
                                         }
                                     ]
@@ -170,3 +189,95 @@ def test_existing_job_is_not_overwritten(tmp_path: Path):
     batch.submit_batch([tmp_path / "a.pdf"], tmp_path / "out", client=client)
     with pytest.raises(FileExistsError):
         batch.submit_batch([tmp_path / "a.pdf"], tmp_path / "out", client=client)
+
+
+def test_blank_pages_complete_the_document(tmp_path: Path):
+    """A blank page returns empty text with finish_reason=stop; it must not block the document."""
+    _pdf(tmp_path / "a.pdf", 3)
+    client = FakeOpenAI(blank_ids={"d0-p1"})
+    out = tmp_path / "out"
+    batch.submit_batch([tmp_path / "a.pdf"], out, client=client)
+    client.finish_all()
+    result = batch.collect_batch(out, client=client)
+    assert result.complete
+    assert (out / "a.md").read_text() == "# d0-p0\n\n# d0-p2\n"
+
+
+def test_unreadable_document_is_reported_not_written_empty(tmp_path: Path):
+    """A corrupt file mid-job used to leave later documents with no page count, which collect
+    then wrote out as empty Markdown files."""
+    _pdf(tmp_path / "a.pdf", 1)
+    (tmp_path / "b.pdf").write_bytes(b"%PDF-1.4 not really a pdf")
+    _pdf(tmp_path / "c.pdf", 2)
+    client = FakeOpenAI()
+    out = tmp_path / "out"
+    batch.submit_batch(
+        [tmp_path / "a.pdf", tmp_path / "b.pdf", tmp_path / "c.pdf"], out, client=client
+    )
+    client.finish_all()
+    result = batch.collect_batch(out, client=client)
+    assert sorted(p.name for p in result.written) == ["a.md", "c.md"]
+    assert not (out / "b.md").exists()
+    assert str((tmp_path / "b.pdf").resolve()) in result.document_errors
+
+
+def test_crash_after_batch_creation_is_recovered_without_double_billing(tmp_path: Path):
+    _pdf(tmp_path / "a.pdf", 2)
+    client = FakeOpenAI()
+    client.crash_on_create = True
+    out = tmp_path / "out"
+    with pytest.raises(KeyboardInterrupt):
+        batch.submit_batch([tmp_path / "a.pdf"], out, client=client)
+    assert len(client.batch_store) == 1  # created server-side, id never saved locally
+    client.finish_all()
+    result = batch.collect_batch(out, client=client)  # adopts the orphaned batch
+    assert len(client.batch_store) == 1  # nothing was paid for twice
+    assert [p.name for p in result.written] == ["a.md"]
+
+
+def test_rejected_batch_reports_reason_and_wait_does_not_retry(tmp_path: Path):
+    _pdf(tmp_path / "a.pdf", 1)
+    client = FakeOpenAI()
+    client.reject_next = True
+    out = tmp_path / "out"
+    batch.submit_batch([tmp_path / "a.pdf"], out, client=client)
+    client.finish_all()
+    result = batch.wait_batch(out, poll_seconds=0, retry_failed=True, client=client)
+    assert list(result.batch_errors.values()) == ["invalid model"]
+    assert result.resubmitted == 0 and len(client.batch_store) == 1
+
+
+def test_error_rows_with_null_body_do_not_crash(tmp_path: Path):
+    _pdf(tmp_path / "a.pdf", 1)
+    client = FakeOpenAI()
+    out = tmp_path / "out"
+    batch.submit_batch([tmp_path / "a.pdf"], out, client=client)
+    b = client.batch_store["batch-0"]
+    b.status, b.output_file_id, b.error_file_id = "completed", None, "err"
+    client.contents["err"] = json.dumps({"custom_id": "d0-p0", "response": {"body": None}})
+    result = batch.collect_batch(out, client=client)
+    assert "d0-p0" in result.failed_pages
+    # the reason survives a second collect
+    assert "d0-p0" in batch.collect_batch(out, client=client).failed_pages
+
+
+def test_output_names_never_collide(tmp_path: Path):
+    files = [Path("x/report.pdf"), Path("y/report.pdf"), Path("report-2.pdf"), Path("Report.pdf")]
+    names = [o.name for o in batch._output_paths(files, tmp_path)]
+    assert len({n.casefold() for n in names}) == 4
+
+
+def test_cli_collect_exits_nonzero_when_documents_are_incomplete(tmp_path: Path, monkeypatch):
+    from typer.testing import CliRunner
+
+    from llm_markdownify.batch_cli import app
+
+    _pdf(tmp_path / "a.pdf", 2)
+    client = FakeOpenAI(fail_ids={"d0-p1"})
+    out = tmp_path / "out"
+    batch.submit_batch([tmp_path / "a.pdf"], out, client=client)
+    client.finish_all()
+    monkeypatch.setattr(batch, "_client", lambda api_base=None: client)
+    result = CliRunner().invoke(app, ["collect", str(out)])
+    assert result.exit_code == 1
+    assert "pages 2" in result.output

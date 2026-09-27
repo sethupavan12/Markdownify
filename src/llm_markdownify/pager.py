@@ -10,7 +10,7 @@ import threading
 from dataclasses import dataclass, field
 from io import BytesIO
 from pathlib import Path
-from typing import List, Literal
+from typing import Iterator, List, Literal
 
 import pypdfium2 as pdfium
 from PIL import Image, ImageOps
@@ -111,16 +111,15 @@ def _page_from_pil(index: int, img: Image.Image, max_side: int, fmt: ImageFormat
     )
 
 
-def iter_pdf_pages_as_images(
+def iter_pdf_pages(
     pdf_path: Path, dpi: int, max_side: int = 2048, fmt: ImageFormat = "jpeg"
-) -> List[PageImage]:
-    """Render every PDF page at `dpi`, capped so the longest side is at most `max_side` pixels.
+) -> Iterator[PageImage]:
+    """Yield PDF pages one at a time, rendered at `dpi` and capped at `max_side` pixels.
 
-    The cap matters: vision APIs reject or silently downscale very large images, and large
-    scanned pages at high DPI exceed provider image limits.
+    Streaming keeps memory flat for very long documents. The cap matters: vision APIs reject or
+    silently downscale very large images, and large scanned pages at high DPI exceed their limits.
     """
     logger.info("Rendering PDF pages at %s DPI (max %spx)", dpi, max_side)
-    pages: List[PageImage] = []
     with _PDFIUM_LOCK:
         pdf = pdfium.PdfDocument(str(pdf_path))
     try:
@@ -142,23 +141,31 @@ def iter_pdf_pages_as_images(
                         bitmap.close()
                 finally:
                     page.close()
-            pages.append(_page_from_pil(i, pil_image, max_side, fmt))
+            yield _page_from_pil(i, pil_image, max_side, fmt)
     finally:
         with _PDFIUM_LOCK:
             pdf.close()
-    return pages
 
 
-def _load_image_pages(path: Path, max_side: int, fmt: ImageFormat) -> List[PageImage]:
-    """Load an image file. Multi-frame images (e.g. multi-page TIFF) become one page per frame."""
-    pages: List[PageImage] = []
+def iter_pdf_pages_as_images(
+    pdf_path: Path, dpi: int, max_side: int = 2048, fmt: ImageFormat = "jpeg"
+) -> List[PageImage]:
+    """All pages of a PDF as a list (see `iter_pdf_pages`)."""
+    return list(iter_pdf_pages(pdf_path, dpi, max_side, fmt))
+
+
+def iter_image_pages(path: Path, max_side: int, fmt: ImageFormat) -> Iterator[PageImage]:
+    """Yield the pages of an image file. Multi-frame images (multi-page TIFF) give one per frame."""
     with Image.open(path) as img:
         n_frames = getattr(img, "n_frames", 1) if path.suffix.lower() in {".tif", ".tiff"} else 1
         for i in range(n_frames):
             img.seek(i)
             frame = ImageOps.exif_transpose(img)  # phone photos carry rotation in EXIF
-            pages.append(_page_from_pil(i, frame, max_side, fmt))
-    return pages
+            yield _page_from_pil(i, frame, max_side, fmt)
+
+
+def _load_image_pages(path: Path, max_side: int, fmt: ImageFormat) -> List[PageImage]:
+    return list(iter_image_pages(path, max_side, fmt))
 
 
 def _docx_to_pdf(input_path: Path, out_dir: Path) -> Path:

@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import List, Optional
+from typing import List, NoReturn, Optional
 
 import typer
 
@@ -29,10 +29,15 @@ def _report(result: batch_api.CollectResult) -> None:
     typer.echo(f"Wrote {len(result.written)} document(s).")
     if result.pending_batches:
         typer.echo(f"{result.pending_batches} batch(es) still running; run collect again later.")
-    if result.incomplete:
-        missing = sum(len(p) for p in result.incomplete.values())
-        typer.echo(f"{len(result.incomplete)} document(s) incomplete ({missing} page(s) missing).")
-        for output, pages in list(result.incomplete.items())[:10]:
+    for batch_id, error in result.batch_errors.items():
+        typer.echo(f"  batch {batch_id} was rejected: {error}", err=True)
+    for path, error in list(result.document_errors.items())[:10]:
+        typer.echo(f"  could not read {path}: {error}", err=True)
+    page_gaps = {o: p for o, p in result.incomplete.items() if p}
+    if page_gaps:
+        missing = sum(len(p) for p in page_gaps.values())
+        typer.echo(f"{len(page_gaps)} document(s) incomplete ({missing} page(s) missing).")
+        for output, pages in list(page_gaps.items())[:10]:
             typer.echo(f"  {output}: pages {', '.join(map(str, pages[:20]))}")
     for custom_id, error in list(result.failed_pages.items())[:10]:
         typer.echo(f"  failed {custom_id}: {error}", err=True)
@@ -40,7 +45,13 @@ def _report(result: batch_api.CollectResult) -> None:
         typer.echo(f"Resubmitted {result.resubmitted} failed page(s) as a new batch.")
 
 
-def _fail(e: Exception) -> None:
+def _exit_for(result: batch_api.CollectResult) -> None:
+    """Exit 1 when the job has finished but some documents could not be written."""
+    if not result.pending_batches and not result.resubmitted and result.incomplete:
+        raise typer.Exit(code=1)
+
+
+def _fail(e: Exception) -> NoReturn:
     typer.secho(f"Error: {type(e).__name__}: {e}", err=True, fg=typer.colors.RED)
     raise typer.Exit(code=1)
 
@@ -74,11 +85,14 @@ def submit(
             api_base=api_base,
         )
         if wait:
-            _report(batch_api.wait_batch(out, retry_failed=True))
+            result = batch_api.wait_batch(out, retry_failed=True)
         else:
             typer.echo(f"Submitted. Check with: markdownify-batch status {out}")
+            return
     except Exception as e:  # one clean line, never a traceback with locals
         _fail(e)
+    _report(result)
+    _exit_for(result)
 
 
 @app.command()
@@ -105,9 +119,11 @@ def collect(
 ) -> None:
     """Download finished pages and write every complete document. Safe to re-run."""
     try:
-        _report(batch_api.collect_batch(out, retry_failed=retry_failed))
+        result = batch_api.collect_batch(out, retry_failed=retry_failed)
     except Exception as e:
         _fail(e)
+    _report(result)
+    _exit_for(result)
 
 
 @app.command("wait")
@@ -118,11 +134,13 @@ def wait_cmd(
 ) -> None:
     """Block until the job finishes, then collect."""
     try:
-        _report(
-            batch_api.wait_batch(Path(out), poll_seconds=poll_seconds, retry_failed=retry_failed)
+        result = batch_api.wait_batch(
+            Path(out), poll_seconds=poll_seconds, retry_failed=retry_failed
         )
     except Exception as e:
         _fail(e)
+    _report(result)
+    _exit_for(result)
 
 
 if __name__ == "__main__":  # pragma: no cover
