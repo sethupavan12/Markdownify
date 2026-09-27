@@ -14,6 +14,6 @@ repos:
       - id: add-apache-header
         name: add-apache-header
         entry: python scripts/add_header.py
-        language: system
+        language: python
         pass_filenames: true
         files: \.(py|toml|yml|yaml)$

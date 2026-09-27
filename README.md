@@ -45,8 +45,7 @@ convert(
     "input.pdf",  # or an image path like "input.png"
     "output.md",
     model="gpt-5-mini",   # optional; can rely on env/provider defaults
-    dpi=72,
-    profile="contracts",    # or path to JSON profile
+    profile="generic",    # default; or "contracts", or a path to a JSON profile
 )
 ```
 
@@ -87,6 +86,18 @@ Pick one of the following. See the full providers list and details in the LiteLL
     ```bash
     markdownify input.pdf -o output.md --model openrouter/z-ai/glm-4.5v
     ```
+- **Anthropic (Claude)**
+  ```bash
+  export ANTHROPIC_API_KEY="..."
+  markdownify input.pdf -o output.md --model anthropic/claude-sonnet-5
+  ```
+
+- **DeepSeek**
+  ```bash
+  export DEEPSEEK_API_KEY="..."
+  markdownify input.pdf -o output.md --model deepseek/deepseek-flash
+  ```
+
 - **Azure OpenAI**
   - Set these environment variables (values from your Azure OpenAI resource):
     ```bash
@@ -106,21 +117,26 @@ Pick one of the following. See the full providers list and details in the LiteLL
     export OPENAI_API_KEY="..."
     export OPENAI_API_BASE="https://your-openai-compatible-endpoint.com/v1"
     ```
-  - Use the model name supported by that endpoint:
+  - Use the model name supported by that endpoint, prefixed with `openai/`, or pass the URL per run:
     ```bash
-    markdownify input.pdf -o output.md --model <model-name>
+    markdownify input.pdf -o output.md --model openai/<model-name> --api-base https://your-endpoint/v1
     ```
+  - The same works for local servers (Ollama, LM Studio, vLLM, llama.cpp) with no API key.
   - Reference: [LiteLLM Providers](https://docs.litellm.ai/docs/providers)
 
 For additional providers and advanced configuration (fallbacks, cost tracking, streaming), see the LiteLLM docs: [Getting Started](https://docs.litellm.ai/).
 
 ### Configuration flags
 - `--model`: LiteLLM model (e.g., `gpt-5-mini`, `azure/<deployment>`, `gemini/gemini-2.5-flash`)
-- `--dpi`: Render DPI (default 72). Ignored for direct image inputs.
-- `--max-group-pages`: Max pages to merge for continued content (default 3)
-- `--no-grouping`: Disable LLM-based grouping
-- `--temperature`, `--max-tokens`: LLM generation params
-- `--grouping_concurrency` : to control how many checks are made at once (defaults to `concurrency`)
+- `--profile`: prompt profile, `generic` (default), `contracts`, or a path to a JSON profile
+- `--dpi`: PDF render DPI (default 200). Ignored for image inputs.
+- `--max-image-px`: longest side of each page image sent to the model (default 2048)
+- `--max-group-pages`: max pages to merge when a table or chart continues across pages (default 3)
+- `--no-grouping`: disable LLM-based detection of content continuing across pages
+- `--temperature`, `--max-tokens`, `--reasoning-effort`: generation parameters
+- `--api-base`: point at any OpenAI-compatible server (vLLM, Ollama, LM Studio)
+- `--concurrency`, `--grouping-concurrency`, `--rate-limit`: throughput controls
+- `--cache`: cache LLM responses on disk so re-runs are free
 
 ## Markdownify Cloud
 If you’d like to run Markdownify in production with advanced features, on your own infrastructure, using your own LLMs, or tailored to your specific use case, visit [markdownify.xyz ](https://www.markdownify.xyz/) to explore our cloud offering and get in touch.

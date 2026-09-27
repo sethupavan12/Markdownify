@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import threading
 from pathlib import Path
 from typing import Optional
 
@@ -19,7 +21,7 @@ logger = get_logger("llm_markdownify.cache")
 def _hash_inputs(*args: str) -> str:
     """Create a stable hash from input strings."""
     combined = "||".join(args)
-    return hashlib.sha256(combined.encode("utf-8")).hexdigest()[:16]
+    return hashlib.sha256(combined.encode("utf-8")).hexdigest()
 
 
 class ResponseCache:
@@ -71,7 +73,10 @@ class ResponseCache:
                 "image_hashes": image_hashes,
                 "response": response,
             }
-            path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+            # Write to a temp file then rename, so concurrent readers never see a partial file.
+            tmp = path.with_suffix(f".{os.getpid()}.{threading.get_ident()}.tmp")
+            tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+            os.replace(tmp, path)
             logger.debug("Cached response with key %s", key)
         except OSError as e:
             logger.warning("Cache write error: %s", e)

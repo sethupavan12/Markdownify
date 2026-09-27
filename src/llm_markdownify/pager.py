@@ -5,13 +5,15 @@
 from __future__ import annotations
 
 import base64
+import tempfile
+import threading
 from dataclasses import dataclass, field
 from io import BytesIO
 from pathlib import Path
-from typing import Iterable, List
+from typing import List, Literal
 
 import pypdfium2 as pdfium
-from PIL import Image
+from PIL import Image, ImageOps
 
 from .logging import get_logger
 
@@ -22,13 +24,25 @@ except Exception:  # pragma: no cover - optional
 
 logger = get_logger("llm_markdownify.pager")
 
+ImageFormat = Literal["jpeg", "png"]
+
+IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".tif", ".tiff", ".bmp", ".gif"}
+SUPPORTED_SUFFIXES = {".pdf", ".docx"} | IMAGE_SUFFIXES
+
+# PDFium is not thread-safe: rendering from several threads at once crashes the interpreter.
+# Every pypdfium2 call in this module must hold this lock.
+_PDFIUM_LOCK = threading.Lock()
+
+_JPEG_QUALITY = 90
+
 
 @dataclass
 class PageImage:
     index: int
     width: int
     height: int
-    content: bytes  # PNG bytes
+    content: bytes  # encoded image bytes (see mime)
+    mime: str = "image/png"
     _data_url: str | None = field(default=None, init=False, repr=False, compare=False)
     _continuation_data_url: str | None = field(default=None, init=False, repr=False, compare=False)
 
@@ -36,7 +50,7 @@ class PageImage:
     def data_url(self) -> str:
         if self._data_url is None:
             b64 = base64.b64encode(self.content).decode("ascii")
-            self._data_url = f"data:image/png;base64,{b64}"
+            self._data_url = f"data:{self.mime};base64,{b64}"
         return self._data_url
 
     @property
@@ -47,55 +61,129 @@ class PageImage:
         Cached after first computation.
         """
         if self._continuation_data_url is None:
-            max_width = 1024
             with BytesIO(self.content) as buf:
                 img = Image.open(buf)
                 img.load()
-            if img.width > max_width:
-                ratio = max_width / float(img.width)
-                new_size = (max_width, max(1, int(img.height * ratio)))
-                img = img.resize(new_size, Image.LANCZOS)
-            with BytesIO() as out:
-                img = img.convert("RGB")
-                img.save(out, format="JPEG", quality=70, optimize=True)
-                data = out.getvalue()
+            img = _fit(img.convert("RGB"), 1024)
+            data = _encode(img, "jpeg", quality=70)
             b64 = base64.b64encode(data).decode("ascii")
             self._continuation_data_url = f"data:image/jpeg;base64,{b64}"
         return self._continuation_data_url
 
 
-def _docx_to_pdf(input_path: Path) -> Path:
+def _fit(img: Image.Image, max_side: int) -> Image.Image:
+    """Downscale so the longest side is at most max_side pixels. Never upscales."""
+    longest = max(img.width, img.height)
+    if longest <= max_side:
+        return img
+    ratio = max_side / float(longest)
+    size = (max(1, round(img.width * ratio)), max(1, round(img.height * ratio)))
+    return img.resize(size, Image.LANCZOS)
+
+
+def _to_rgb(img: Image.Image) -> Image.Image:
+    """Flatten transparency onto white (a plain convert('RGB') turns transparent areas black)."""
+    if img.mode in ("RGBA", "LA", "P", "PA"):
+        rgba = img.convert("RGBA")
+        background = Image.new("RGB", rgba.size, "white")
+        background.paste(rgba, mask=rgba.getchannel("A"))
+        return background
+    return img.convert("RGB")
+
+
+def _encode(img: Image.Image, fmt: ImageFormat, quality: int = _JPEG_QUALITY) -> bytes:
+    with BytesIO() as out:
+        if fmt == "jpeg":
+            img.save(out, format="JPEG", quality=quality, optimize=True)
+        else:
+            img.save(out, format="PNG", optimize=False)
+        return out.getvalue()
+
+
+def _page_from_pil(index: int, img: Image.Image, max_side: int, fmt: ImageFormat) -> PageImage:
+    img = _fit(_to_rgb(img), max_side)
+    return PageImage(
+        index=index,
+        width=img.width,
+        height=img.height,
+        content=_encode(img, fmt),
+        mime=f"image/{fmt}",
+    )
+
+
+def iter_pdf_pages_as_images(
+    pdf_path: Path, dpi: int, max_side: int = 2048, fmt: ImageFormat = "jpeg"
+) -> List[PageImage]:
+    """Render every PDF page at `dpi`, capped so the longest side is at most `max_side` pixels.
+
+    The cap matters: vision APIs reject or silently downscale very large images, and large
+    scanned pages at high DPI exceed provider image limits.
+    """
+    logger.info("Rendering PDF pages at %s DPI (max %spx)", dpi, max_side)
+    pages: List[PageImage] = []
+    with _PDFIUM_LOCK:
+        pdf = pdfium.PdfDocument(str(pdf_path))
+    try:
+        with _PDFIUM_LOCK:
+            num_pages = len(pdf)
+        for i in range(num_pages):
+            # Hold the lock only while touching PDFium; encoding below runs concurrently.
+            with _PDFIUM_LOCK:
+                page = pdf[i]
+                try:
+                    width_pt, height_pt = page.get_size()
+                    scale = min(dpi / 72.0, max_side / max(width_pt, height_pt, 1.0))
+                    bitmap = page.render(scale=scale)
+                    try:
+                        # Copy out of PDFium memory and free the bitmap while still holding the
+                        # lock, so no PDFium call happens later from a garbage-collector finalizer.
+                        pil_image = bitmap.to_pil().copy()
+                    finally:
+                        bitmap.close()
+                finally:
+                    page.close()
+            pages.append(_page_from_pil(i, pil_image, max_side, fmt))
+    finally:
+        with _PDFIUM_LOCK:
+            pdf.close()
+    return pages
+
+
+def _load_image_pages(path: Path, max_side: int, fmt: ImageFormat) -> List[PageImage]:
+    """Load an image file. Multi-frame images (e.g. multi-page TIFF) become one page per frame."""
+    pages: List[PageImage] = []
+    with Image.open(path) as img:
+        n_frames = getattr(img, "n_frames", 1) if path.suffix.lower() in {".tif", ".tiff"} else 1
+        for i in range(n_frames):
+            img.seek(i)
+            frame = ImageOps.exif_transpose(img)  # phone photos carry rotation in EXIF
+            pages.append(_page_from_pil(i, frame, max_side, fmt))
+    return pages
+
+
+def _docx_to_pdf(input_path: Path, out_dir: Path) -> Path:
     if docx2pdf_convert is None:
         raise RuntimeError(
             "DOCX support requires 'docx2pdf' and platform support for Word/COM. Prefer PDFs."
         )
-    temp_pdf = input_path.with_suffix(".converted.pdf")
+    temp_pdf = out_dir / f"{input_path.stem}.pdf"
     logger.info("Converting DOCX to PDF: %s -> %s", input_path, temp_pdf)
     docx2pdf_convert(str(input_path), str(temp_pdf))
     return temp_pdf
 
 
-def iter_pdf_pages_as_images(pdf_path: Path, dpi: int) -> Iterable[PageImage]:
-    logger.info("Rendering PDF pages to images at %s DPI", dpi)
-    pdf = pdfium.PdfDocument(str(pdf_path))
-    num_pages = len(pdf)
-    scale = dpi / 72.0
-    for i in range(num_pages):
-        page = pdf[i]
-        bitmap = page.render(scale=scale)
-        pil_image = bitmap.to_pil()
-        with BytesIO() as buf:
-            pil_image.save(buf, format="PNG")
-            data = buf.getvalue()
-        yield PageImage(index=i, width=pil_image.width, height=pil_image.height, content=data)
+def load_document_pages(
+    input_path: Path,
+    dpi: int,
+    allow_docx: bool = False,
+    max_side: int = 2048,
+    image_format: ImageFormat = "jpeg",
+) -> List[PageImage]:
+    """Load a PDF, image, or DOCX (if allowed) as a list of page images.
 
-
-def load_document_pages(input_path: Path, dpi: int, allow_docx: bool = False) -> List[PageImage]:
-    """Load a PDF, image (PNG/JPG/JPEG), or DOCX (if allowed) as a list of page images.
-
-    - PDF: rendered to page PNGs using pypdfium2 at the provided DPI
-    - Image (.png/.jpg/.jpeg): treated as a single page; converted to PNG bytes
-    - DOCX: optionally converted to PDF, then rendered like a PDF
+    - PDF: rendered with pypdfium2 at `dpi`, longest side capped at `max_side`
+    - Image (.png/.jpg/.jpeg/.webp/.tif/.tiff/.bmp/.gif): one page per frame, capped at `max_side`
+    - DOCX: converted to PDF in a temp dir (via Word), then rendered like a PDF
     """
     suffix = input_path.suffix.lower()
     if suffix == ".docx":
@@ -103,26 +191,16 @@ def load_document_pages(input_path: Path, dpi: int, allow_docx: bool = False) ->
             raise ValueError(
                 "DOCX not allowed. Prefer exporting DOCX to PDF, or enable --allow-docx (requires Word/COM)."
             )
-        pdf_path = _docx_to_pdf(input_path)
-        pages = list(iter_pdf_pages_as_images(pdf_path, dpi=dpi))
-        logger.info("Loaded %d pages", len(pages))
-        return pages
-
-    if suffix == ".pdf":
-        pages = list(iter_pdf_pages_as_images(input_path, dpi=dpi))
-        logger.info("Loaded %d pages", len(pages))
-        return pages
-
-    if suffix in {".png", ".jpg", ".jpeg"}:
-        with Image.open(input_path) as img:
-            rgb_img = img.convert("RGB")
-            with BytesIO() as buf:
-                rgb_img.save(buf, format="PNG")
-                data = buf.getvalue()
-            page = PageImage(index=0, width=rgb_img.width, height=rgb_img.height, content=data)
-        logger.info("Loaded 1 image page from %s", input_path)
-        return [page]
-
-    raise ValueError(
-        f"Unsupported input type: {suffix}. Expected one of .pdf, .docx, .png, .jpg, .jpeg"
-    )
+        with tempfile.TemporaryDirectory(prefix="llm-markdownify-") as tmp:
+            pdf_path = _docx_to_pdf(input_path, Path(tmp))
+            pages = iter_pdf_pages_as_images(pdf_path, dpi, max_side, image_format)
+    elif suffix == ".pdf":
+        pages = iter_pdf_pages_as_images(input_path, dpi, max_side, image_format)
+    elif suffix in IMAGE_SUFFIXES:
+        pages = _load_image_pages(input_path, max_side, image_format)
+    else:
+        raise ValueError(
+            f"Unsupported input type: {suffix}. Expected one of {', '.join(sorted(SUPPORTED_SUFFIXES))}"
+        )
+    logger.info("Loaded %d page(s) from %s", len(pages), input_path)
+    return pages

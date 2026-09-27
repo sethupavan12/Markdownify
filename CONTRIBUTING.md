@@ -54,7 +54,7 @@ uv run pre-commit run --all-files
 ## Running the tool
 - CLI:
   ```bash
-  uv run markdownify run /absolute/path/to/input.pdf -o /absolute/path/to/output.md --model gpt-4.1-mini
+  uv run markdownify /absolute/path/to/input.pdf -o /absolute/path/to/output.md --model gpt-4.1-mini
   ```
 - Library API:
   ```python
@@ -70,20 +70,20 @@ uv run pre-commit run --all-files
 
 ## Prompt profiles
 The prompts for continuation detection and markdown conversion are swappable.
-- Built-ins live in `src/llm_markdownify/prompt_profiles.py` (default: `contracts`, also `generic`).
+- Built-ins live in `src/llm_markdownify/prompt_profiles.py` (default: `generic`, also `contracts`).
 - You can pass a custom JSON profile at runtime via `--profile /path/to/profile.json`.
 - JSON must include: `name`, `continuation_system`, `continuation_user`, `markdown_system`, `markdown_user`.
 
 Prompts should:
 - Produce only document content (no disclaimers/notes/meta commentary)
-- Follow the heading policy for contracts (top-level numeric headings, strict decimal rules, TOC as lists)
-- Emphasize tables as GFM tables and charts as Mermaid when feasible
+- Transcribe faithfully: exact text, natural reading order, no running headers/footers or page numbers
+- Use LaTeX (`$...$`, `$$...$$`) for math, GFM tables (HTML tables for merged cells), Mermaid for diagrams
 
 ## Grouping logic
 The grouping algorithm merges consecutive pages only when a split visual structure (tables, boxed panels, charts) continues across the boundary. Plain text continuity alone must not trigger merging. Keep changes simple and readable.
 
 ## Performance tips
-- DPI: Default is 72. Higher DPI improves fidelity but increases latency. Suggest 120–200 for harder documents.
+- DPI: Default is 200, capped so the longest image side is `--max-image-px` (2048). Vision APIs downscale or reject larger images.
 - Concurrency: Configurable; be mindful of provider rate limits.
 - Prefer PNG for crisp text; JPEG can be added in future for heavy scans.
 

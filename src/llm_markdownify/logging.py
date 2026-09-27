@@ -39,7 +39,7 @@ def get_logger(name: str) -> logging.Logger:
         return logger
 
     logger.setLevel(_configured_level)
-    handler = logging.StreamHandler(sys.stdout)
+    handler = logging.StreamHandler(sys.stderr)  # stdout is reserved for program output
     handler.setLevel(logging.DEBUG)  # Handler allows all; logger controls level
 
     if _configured_level <= logging.DEBUG:

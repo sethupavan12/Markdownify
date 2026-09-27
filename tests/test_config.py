@@ -19,12 +19,14 @@ def test_config_defaults(tmp_path: Path):
 
     cfg = MarkdownifyConfig(input_path=input_pdf, output_path=output_md)
 
-    assert cfg.dpi == 72
+    assert cfg.dpi == 200
+    assert cfg.max_image_px == 2048
+    assert cfg.image_format == "jpeg"
     assert cfg.max_group_pages == 3
     assert cfg.enable_grouping is True
-    assert cfg.temperature == 0.1
+    assert cfg.temperature is None
     assert cfg.concurrency == 4
-    assert cfg.max_retries == 3
+    assert cfg.max_retries == 5
     assert cfg.retry_delay == 1.0
     assert cfg.rate_limit_rpm is None
     assert cfg.enable_cache is False
