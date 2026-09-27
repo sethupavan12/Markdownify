@@ -177,6 +177,15 @@ def _completion_with_retry(
         if max_tokens is not None:
             kwargs["max_tokens"] = max_tokens
         kwargs.update(_llm_kwargs)
+        if (
+            kwargs.get("api_base")
+            and "api_key" not in kwargs
+            and model.startswith("openai/")
+            and not os.environ.get("OPENAI_API_KEY")
+        ):
+            # Local OpenAI-compatible servers (LM Studio, Ollama, vLLM, llama.cpp) need no key, but
+            # the OpenAI client refuses to start without one.
+            kwargs["api_key"] = "not-needed"
         resp = _litellm_completion(**kwargs)
         choice = resp["choices"][0]
         content = choice["message"]["content"]
