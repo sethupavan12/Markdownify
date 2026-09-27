@@ -36,6 +36,7 @@ input (.pdf | .png/.jpg/.jpeg | .docx opt-in)
 | `pager.py` | Rendering. PDFs via pypdfium2 (under a global lock), images incl. multi-page TIFF. `PageImage` holds encoded bytes plus lazy data URLs (full image, and a 1024px JPEG for grouping) |
 | `grouping.py` | Cross-page continuation detection and grouping |
 | `llm.py` | LiteLLM calls, retries on transient errors only (rate limit, timeout, 5xx, empty answer), token-bucket `RateLimiter`, fence stripping, cache lookups. Silences LiteLLM logging at import |
+| `batch.py` / `batch_cli.py` | OpenAI Batch API mode (`markdownify-batch submit/status/collect/wait`). Uses the `openai` SDK directly; job state in `<out>/.markdownify-batch/`; one request per page, no grouping |
 | `cache.py` | Optional file cache of LLM responses (`~/.cache/llm-markdownify`), keyed on model + prompt + image hashes |
 | `prompts.py` / `prompt_profiles.py` | Prompt text. Built-in profiles: `generic` (default) and `contracts` (legal heading rules). Custom profiles are JSON files with `name`, `continuation_system`, `continuation_user`, `markdown_system`, `markdown_user` |
 | `logging.py` | `get_logger` / `set_log_level` (`quiet`/`normal`/`verbose`/`debug`) |

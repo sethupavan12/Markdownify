@@ -71,8 +71,8 @@ The library should work well called from a script, a service, or an agent's shel
   when needed; or single-pass conversion with the previous page's tail as context and table stitching in
   code.
 - **Adaptive resolution.** Start at a lower pixel cap and escalate for dense or tiny text pages.
-- **Batch mode** using provider batch APIs (about 50% cheaper) for large corpora, plus a cost estimate
-  (`--dry-run`) before a big run.
+- **Batch mode**: done for OpenAI (`markdownify-batch`). Next: Anthropic Message Batches, a cost
+  estimate (`--dry-run`) before a big run, and cross-page table stitching in batch output.
 - **Prompt caching** on providers that need explicit markers (Anthropic `cache_control`).
 
 ## Phase 4 - Fully local, no API key
@@ -85,8 +85,9 @@ A separate niche: private data, air-gapped, zero cost per page.
   `--preset paddleocr-vl`, benchmarked on the same subset.
 - **Docling backend** (`pip install llm-markdownify[docling]`, `--backend docling`): fully local pipeline
   (layout + TableFormer, or granite-docling-258M via MLX on Apple Silicon), plus Office, HTML and EPUB
-  inputs that we do not support today. Docling's standard pipeline scores about 50 on olmOCR-Bench, so we
-  position it as "local and broad", and keep VLM mode as "accurate".
+  inputs that we do not support today. Measured on our subset (M4, 16 GB): standard pipeline 54.7 at
+  2.5 s/page median (100 on headers/footers, 82.4 tables, 0 math); granite-docling-258M on MLX 48.2 at
+  7.1 s/page. So we position Docling as "local and broad", not "accurate". See docs/speed-and-cost.md.
 - Publish a local-vs-API table: accuracy, pages per minute on a MacBook and on one GPU, cost.
 
 ## Phase 5 - RAG-ready output
