@@ -174,11 +174,11 @@ def test_duplicate_stems_get_distinct_outputs(tmp_path: Path):
 
 def test_non_openai_models_are_rejected(tmp_path: Path):
     _pdf(tmp_path / "a.pdf", 1)
-    with pytest.raises(ValueError, match="OpenAI"):
+    with pytest.raises(ValueError, match="OpenAI .* and Anthropic"):
         batch.submit_batch(
             [tmp_path / "a.pdf"],
             tmp_path / "out",
-            model="anthropic/claude-sonnet-5",
+            model="gemini/gemini-2.5-flash",
             client=FakeOpenAI(),
         )
 
@@ -277,7 +277,150 @@ def test_cli_collect_exits_nonzero_when_documents_are_incomplete(tmp_path: Path,
     out = tmp_path / "out"
     batch.submit_batch([tmp_path / "a.pdf"], out, client=client)
     client.finish_all()
-    monkeypatch.setattr(batch, "_client", lambda api_base=None: client)
+    monkeypatch.setattr(
+        batch, "_backend", lambda manifest, c=None: batch._OpenAIBackend(client=client)
+    )
     result = CliRunner().invoke(app, ["collect", str(out)])
     assert result.exit_code == 1
     assert "pages 2" in result.output
+
+
+# ---------------------------------------------------------------------------------------------
+# Anthropic Message Batches
+# ---------------------------------------------------------------------------------------------
+
+
+class FakeAnthropic:
+    """In-memory stand-in for client.messages.batches (create/retrieve/list/results)."""
+
+    def __init__(self, outcomes: dict[str, tuple] | None = None):
+        # custom_id -> ("text", str) | ("blank",) | ("refusal",) | ("errored", msg)
+        self.outcomes = outcomes or {}
+        self.store: dict[str, SimpleNamespace] = {}
+        self.requests: dict[str, list[dict]] = {}
+        self.crash_on_create = False
+        batches = SimpleNamespace(
+            create=self._create, retrieve=self._retrieve, list=self._list, results=self._results
+        )
+        self.messages = SimpleNamespace(batches=batches)
+
+    @staticmethod
+    def _counts(processing=0, succeeded=0, errored=0):
+        return SimpleNamespace(
+            processing=processing, succeeded=succeeded, errored=errored, canceled=0, expired=0
+        )
+
+    def _create(self, requests):
+        from datetime import datetime, timezone
+
+        batch_id = f"msgbatch_{len(self.store)}"
+        self.requests[batch_id] = requests
+        self.store[batch_id] = SimpleNamespace(
+            id=batch_id,
+            processing_status="in_progress",
+            created_at=datetime.now(timezone.utc),
+            request_counts=self._counts(processing=len(requests)),
+        )
+        if self.crash_on_create:
+            self.crash_on_create = False
+            raise KeyboardInterrupt
+        return self.store[batch_id]
+
+    def _retrieve(self, batch_id):
+        return self.store[batch_id]
+
+    def _list(self, limit=20):
+        return list(self.store.values())
+
+    def finish_all(self):
+        for b in self.store.values():
+            b.processing_status = "ended"
+            n = len(self.requests[b.id])
+            b.request_counts = self._counts(succeeded=n)
+
+    def _results(self, batch_id):
+        for req in self.requests[batch_id]:
+            cid = req["custom_id"]
+            kind = self.outcomes.get(cid, ("text", f"```markdown\n# {cid}\n```"))
+            if kind[0] == "errored":
+                error = SimpleNamespace(error=SimpleNamespace(message=kind[1]))
+                yield SimpleNamespace(
+                    custom_id=cid, result=SimpleNamespace(type="errored", error=error)
+                )
+                continue
+            text = kind[1] if kind[0] == "text" else ""
+            stop = {"text": "end_turn", "blank": "end_turn", "refusal": "refusal"}[kind[0]]
+            content = [SimpleNamespace(type="text", text=text)] if text else []
+            msg = SimpleNamespace(content=content, stop_reason=stop)
+            yield SimpleNamespace(
+                custom_id=cid, result=SimpleNamespace(type="succeeded", message=msg)
+            )
+
+
+def test_anthropic_request_shape(tmp_path: Path):
+    _pdf(tmp_path / "a.pdf", 1)
+    client = FakeAnthropic()
+    batch.submit_batch(
+        [tmp_path / "a.pdf"],
+        tmp_path / "out",
+        model="anthropic/claude-opus-5",
+        reasoning_effort="low",
+        client=client,
+    )
+    [req] = client.requests["msgbatch_0"]
+    params = req["params"]
+    assert req["custom_id"] == "d0-p0"
+    assert params["model"] == "claude-opus-5" and params["max_tokens"] == 16000
+    assert "LaTeX" in params["system"]
+    image, text = params["messages"][0]["content"]
+    assert image["type"] == "image" and image["source"]["media_type"] == "image/jpeg"
+    assert image["source"]["data"] and not image["source"]["data"].startswith("data:")
+    assert text["type"] == "text"
+    assert params["output_config"] == {"effort": "low"}
+    assert "temperature" not in params  # current Claude models reject it
+
+
+def test_anthropic_roundtrip_with_blank_refusal_and_error(tmp_path: Path):
+    _pdf(tmp_path / "a.pdf", 3)
+    _pdf(tmp_path / "b.pdf", 1)
+    client = FakeAnthropic(
+        outcomes={"d0-p1": ("blank",), "d1-p0": ("refusal",), "d0-p2": ("text", "tail")}
+    )
+    out = tmp_path / "out"
+    batch.submit_batch(
+        [tmp_path / "a.pdf", tmp_path / "b.pdf"], out, model="claude-opus-5", client=client
+    )
+    assert batch.batch_status(out, client=client).done is False
+    client.finish_all()
+    assert batch.batch_status(out, client=client).done is True
+    result = batch.collect_batch(out, client=client)
+    assert [p.name for p in result.written] == ["a.md"]
+    assert (out / "a.md").read_text() == "# d0-p0\n\ntail\n"  # blank page contributes nothing
+    assert result.failed_pages == {"d1-p0": "model refused this page"}
+
+
+def test_anthropic_errored_rows_are_retried(tmp_path: Path):
+    _pdf(tmp_path / "a.pdf", 2)
+    client = FakeAnthropic(outcomes={"d0-p1": ("errored", "overloaded")})
+    out = tmp_path / "out"
+    batch.submit_batch([tmp_path / "a.pdf"], out, model="claude-opus-5", client=client)
+    client.finish_all()
+    first = batch.collect_batch(out, client=client, retry_failed=True)
+    assert first.failed_pages == {"d0-p1": "overloaded"} and first.resubmitted == 1
+    assert [r["custom_id"] for r in client.requests["msgbatch_1"]] == ["d0-p1"]
+    client.outcomes.clear()
+    client.finish_all()
+    assert [p.name for p in batch.collect_batch(out, client=client).written] == ["a.md"]
+
+
+def test_anthropic_crash_after_create_is_adopted(tmp_path: Path):
+    _pdf(tmp_path / "a.pdf", 2)
+    client = FakeAnthropic()
+    client.crash_on_create = True
+    out = tmp_path / "out"
+    with pytest.raises(KeyboardInterrupt):
+        batch.submit_batch([tmp_path / "a.pdf"], out, model="claude-opus-5", client=client)
+    client.finish_all()
+    result = batch.collect_batch(out, client=client)
+    assert len(client.store) == 1  # adopted by creation time + request count, not resubmitted
+    assert [p.name for p in result.written] == ["a.md"]

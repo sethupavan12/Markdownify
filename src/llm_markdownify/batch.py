@@ -2,9 +2,12 @@
 # Licensed under the Apache License, Version 2.0. See LICENSE file for details.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Convert large document sets through the OpenAI Batch API: about half the price, up to 24h.
+"""Convert large document sets through a provider batch API: about half the price, up to 24h.
 
-Workflow: `submit_batch` renders every page and uploads the requests, `batch_status` reports
+Supported: the OpenAI Batch API (`gpt-5.4-mini`, `openai/...`) and Anthropic Message Batches
+(`anthropic/claude-...` or `claude-...`).
+
+Workflow: `submit_batch` renders every page and submits the requests, `batch_status` reports
 progress, and `collect_batch` downloads finished pages and writes one Markdown file per input.
 All state lives in `<out_dir>/.markdownify-batch/`, so each step can run in a different process,
 hours apart. Every page is its own request; cross-page table merging is not applied in batch mode.
@@ -12,6 +15,7 @@ hours apart. Every page is its own request; cross-page table merging is not appl
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import tempfile
@@ -24,19 +28,38 @@ from typing import Any, Iterable, Iterator, Optional
 from .llm import _message_with_images, strip_markdown_fence
 from .logging import get_logger
 from .pager import IMAGE_SUFFIXES, ImageFormat, PageImage, iter_image_pages, iter_pdf_pages
-from .prompt_profiles import DEFAULT_PROFILE, load_prompt_profile
+from .prompt_profiles import DEFAULT_PROFILE, PromptProfile, load_prompt_profile
 
 logger = get_logger("llm_markdownify.batch")
 
 STATE_DIR = ".markdownify-batch"
 MANIFEST = "manifest.json"
-TERMINAL = {"completed", "failed", "expired", "cancelled"}
 
-# OpenAI limits per batch input file: 200 MB and 50,000 requests. Stay under both.
+# Per-batch limits: OpenAI 200 MB / 50,000 requests per input file; Anthropic 256 MB / 100,000
+# requests per batch. One shard size under both keeps the code simple.
 MAX_SHARD_BYTES = 190 * 1024 * 1024
 MAX_SHARD_REQUESTS = 50_000
 
 _BATCHABLE_SUFFIXES = {".pdf"} | IMAGE_SUFFIXES
+
+
+@dataclass
+class PageResult:
+    custom_id: str
+    text: Optional[str]  # None when the page failed
+    error: Optional[str] = None
+    truncated: bool = False
+
+
+@dataclass
+class BatchInfo:
+    id: str
+    status: str  # the provider's own status string, for display
+    done: bool
+    total: int
+    completed: int
+    failed: int
+    error: Optional[str] = None  # set when the whole batch was rejected
 
 
 @dataclass
@@ -48,7 +71,7 @@ class BatchStatus:
 
     @property
     def done(self) -> bool:
-        return all(b["status"] in TERMINAL for b in self.batches)
+        return all(b["done"] for b in self.batches)
 
 
 @dataclass
@@ -66,21 +89,224 @@ class CollectResult:
         return not self.incomplete and not self.pending_batches
 
 
-def _openai_model_name(model: str) -> str:
+# --------------------------------------------------------------------------------------------
+# Provider backends. Each turns a page into one request line, starts batches from a shard file,
+# reports status, and yields per-page results in a common shape.
+# --------------------------------------------------------------------------------------------
+
+
+class _OpenAIBackend:
+    name = "openai"
+
+    def __init__(self, api_base: Optional[str] = None, client=None):
+        if client is None:
+            from openai import OpenAI
+
+            client = OpenAI(base_url=api_base) if api_base else OpenAI()
+        self.client = client
+
+    def request_line(
+        self, custom_id: str, model: str, profile: PromptProfile, page: PageImage, opts: dict
+    ) -> str:
+        body: dict[str, Any] = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": profile.markdown_system},
+                _message_with_images(profile.markdown_user, [page.data_url]),
+            ],
+            "max_completion_tokens": opts["max_tokens"],
+        }
+        if opts.get("temperature") is not None:
+            body["temperature"] = opts["temperature"]
+        if opts.get("reasoning_effort"):
+            body["reasoning_effort"] = opts["reasoning_effort"]
+        return json.dumps(
+            {"custom_id": custom_id, "method": "POST", "url": "/v1/chat/completions", "body": body}
+        )
+
+    def upload(self, shard: Path) -> Optional[str]:
+        with open(shard, "rb") as fh:
+            return self.client.files.create(file=fh, purpose="batch").id
+
+    def create(self, shard: Path, input_ref: Optional[str], job_id: str) -> str:
+        return self.client.batches.create(
+            input_file_id=input_ref,
+            endpoint="/v1/chat/completions",
+            completion_window="24h",
+            metadata={"tool": "llm-markdownify", "job_id": job_id},
+        ).id
+
+    def find_orphan(self, entry: dict, job_id: str, known: set[str]) -> Optional[str]:
+        for b in self.client.batches.list(limit=100):
+            meta = getattr(b, "metadata", None) or {}
+            if meta.get("job_id") == job_id and b.input_file_id == entry["input_file_id"]:
+                return b.id
+        return None
+
+    def info(self, batch_id: str) -> BatchInfo:
+        b = self.client.batches.retrieve(batch_id)
+        counts = b.request_counts
+        error = None
+        if b.status == "failed":  # rejected as a whole (e.g. validation); no per-page rows
+            data = getattr(getattr(b, "errors", None), "data", None) or []
+            error = "; ".join(getattr(e, "message", None) or str(e) for e in data) or "failed"
+        return BatchInfo(
+            id=b.id,
+            status=b.status,
+            done=b.status in {"completed", "failed", "expired", "cancelled"},
+            total=counts.total if counts else 0,
+            completed=counts.completed if counts else 0,
+            failed=counts.failed if counts else 0,
+            error=error,
+        )
+
+    def _rows(self, file_id: Optional[str]) -> list[dict[str, Any]]:
+        if not file_id:
+            return []
+        text = self.client.files.content(file_id).text
+        return [json.loads(line) for line in text.splitlines() if line.strip()]
+
+    def results(self, batch_id: str) -> Iterator[PageResult]:
+        b = self.client.batches.retrieve(batch_id)
+        for row in self._rows(b.output_file_id):
+            response = row.get("response") or {}
+            body = response.get("body") or {}
+            choices = body.get("choices") or []
+            choice = choices[0] if choices else {}
+            content = (choice.get("message") or {}).get("content")
+            finish = choice.get("finish_reason")
+            has_text = bool(content and content.strip())
+            # Empty text that finished normally is a blank page (or one holding only the headers
+            # and footers we asked the model to drop): a correct answer, not a failure.
+            if response.get("status_code") == 200 and (has_text or finish == "stop"):
+                yield PageResult(row["custom_id"], content or "", truncated=finish == "length")
+            else:
+                error = row.get("error") or body.get("error") or f"empty ({finish})"
+                yield PageResult(row["custom_id"], None, error=json.dumps(error)[:300])
+        for row in self._rows(b.error_file_id):
+            response_body = (row.get("response") or {}).get("body") or {}
+            error = row.get("error") or response_body.get("error") or "unknown error"
+            yield PageResult(row["custom_id"], None, error=json.dumps(error)[:300])
+
+
+class _AnthropicBackend:
+    name = "anthropic"
+
+    def __init__(self, api_base: Optional[str] = None, client=None):
+        if client is None:
+            import anthropic
+
+            client = anthropic.Anthropic(base_url=api_base) if api_base else anthropic.Anthropic()
+        self.client = client
+
+    def request_line(
+        self, custom_id: str, model: str, profile: PromptProfile, page: PageImage, opts: dict
+    ) -> str:
+        params: dict[str, Any] = {
+            "model": model,
+            "max_tokens": opts["max_tokens"],
+            "system": profile.markdown_system,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": page.mime,
+                                "data": base64.standard_b64encode(page.content).decode("ascii"),
+                            },
+                        },
+                        {"type": "text", "text": profile.markdown_user},
+                    ],
+                }
+            ],
+        }
+        if opts.get("temperature") is not None:  # current Claude models reject it; only if asked
+            params["temperature"] = opts["temperature"]
+        if opts.get("reasoning_effort"):
+            params["output_config"] = {"effort": opts["reasoning_effort"]}
+        return json.dumps({"custom_id": custom_id, "params": params})
+
+    def upload(self, shard: Path) -> Optional[str]:
+        return None  # requests go inline in the create call
+
+    def create(self, shard: Path, input_ref: Optional[str], job_id: str) -> str:
+        with open(shard, encoding="utf-8") as fh:
+            requests = [json.loads(line) for line in fh if line.strip()]
+        return self.client.messages.batches.create(requests=requests).id
+
+    def find_orphan(self, entry: dict, job_id: str, known: set[str]) -> Optional[str]:
+        """Anthropic batches carry no metadata, so match on creation time and request count.
+        Adopt only an unambiguous match; otherwise the pages show as missing and
+        `--retry-failed` resubmits them."""
+        started = entry.get("started_at") or 0
+        matches = []
+        for b in self.client.messages.batches.list(limit=50):
+            created = b.created_at.timestamp() if hasattr(b.created_at, "timestamp") else 0
+            c = b.request_counts
+            total = c.processing + c.succeeded + c.errored + c.canceled + c.expired
+            if b.id not in known and created >= started - 60 and total == entry["requests"]:
+                matches.append(b.id)
+        return matches[0] if len(matches) == 1 else None
+
+    def info(self, batch_id: str) -> BatchInfo:
+        b = self.client.messages.batches.retrieve(batch_id)
+        c = b.request_counts
+        return BatchInfo(
+            id=b.id,
+            status=b.processing_status,
+            done=b.processing_status == "ended",
+            total=c.processing + c.succeeded + c.errored + c.canceled + c.expired,
+            completed=c.succeeded,
+            failed=c.errored + c.canceled + c.expired,
+        )
+
+    def results(self, batch_id: str) -> Iterator[PageResult]:
+        for r in self.client.messages.batches.results(batch_id):
+            result = r.result
+            if result.type == "succeeded":
+                msg = result.message
+                text = "".join(b.text for b in msg.content if b.type == "text")
+                if msg.stop_reason == "refusal":
+                    yield PageResult(r.custom_id, None, error="model refused this page")
+                elif text.strip() or msg.stop_reason == "end_turn":
+                    yield PageResult(r.custom_id, text, truncated=msg.stop_reason == "max_tokens")
+                else:
+                    yield PageResult(r.custom_id, None, error=f"empty ({msg.stop_reason})")
+            elif result.type == "errored":
+                err = result.error
+                detail = getattr(getattr(err, "error", None), "message", None) or str(err)
+                yield PageResult(r.custom_id, None, error=detail[:300])
+            else:  # canceled / expired
+                yield PageResult(r.custom_id, None, error=result.type)
+
+
+def _provider_and_model(model: str) -> tuple[str, str]:
+    if model.startswith("anthropic/"):
+        return "anthropic", model.split("/", 1)[1]
+    if model.startswith("claude"):
+        return "anthropic", model
     if model.startswith("openai/"):
-        return model.split("/", 1)[1]
+        return "openai", model.split("/", 1)[1]
     if "/" in model:
         raise ValueError(
-            f"Batch mode supports OpenAI models (e.g. gpt-5.4-mini), got '{model}'. "
-            "Use the regular `markdownify` command for other providers."
+            f"Batch mode supports OpenAI (e.g. gpt-5.4-mini) and Anthropic (e.g. "
+            f"anthropic/claude-opus-5) models, got '{model}'. Use the regular `markdownify` "
+            "command for other providers."
         )
-    return model
+    return "openai", model
 
 
-def _client(api_base: Optional[str] = None):
-    from openai import OpenAI
+def _backend(manifest: dict[str, Any], client=None):
+    cls = _AnthropicBackend if manifest["provider"] == "anthropic" else _OpenAIBackend
+    return cls(api_base=manifest.get("api_base"), client=client)
 
-    return OpenAI(base_url=api_base) if api_base else OpenAI()
+
+# --------------------------------------------------------------------------------------------
+# Job state
+# --------------------------------------------------------------------------------------------
 
 
 def _state(out_dir: Path) -> Path:
@@ -91,7 +317,10 @@ def _load_manifest(out_dir: Path) -> dict[str, Any]:
     path = _state(out_dir) / MANIFEST
     if not path.exists():
         raise FileNotFoundError(f"No batch job found in {out_dir} (missing {path})")
-    return json.loads(path.read_text(encoding="utf-8"))
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    manifest.setdefault("provider", "openai")
+    manifest.setdefault("page_errors", {})
+    return manifest
 
 
 def _save_manifest(out_dir: Path, manifest: dict[str, Any]) -> None:
@@ -151,7 +380,7 @@ def _iter_pages(path: Path, opts: dict[str, Any]) -> Iterator[PageImage]:
 
 
 def _request_lines(
-    manifest: dict[str, Any], wanted: Optional[set[str]] = None
+    backend, manifest: dict[str, Any], wanted: Optional[set[str]] = None
 ) -> Iterator[tuple[str, str]]:
     """Yield (custom_id, jsonl line) for every page, or only the custom_ids in `wanted`.
 
@@ -160,11 +389,6 @@ def _request_lines(
     """
     opts = manifest["options"]
     profile = load_prompt_profile(manifest["profile"])
-    body_extra: dict[str, Any] = {"max_completion_tokens": opts["max_tokens"]}
-    if opts.get("temperature") is not None:
-        body_extra["temperature"] = opts["temperature"]
-    if opts.get("reasoning_effort"):
-        body_extra["reasoning_effort"] = opts["reasoning_effort"]
     wanted_docs = {int(c.split("-")[0][1:]) for c in wanted} if wanted is not None else None
 
     for doc_index, doc in enumerate(manifest["documents"]):
@@ -177,21 +401,10 @@ def _request_lines(
                 custom_id = _custom_id(doc_index, page.index)
                 if wanted is not None and custom_id not in wanted:
                     continue
-                body = {
-                    "model": manifest["model"],
-                    "messages": [
-                        {"role": "system", "content": profile.markdown_system},
-                        _message_with_images(profile.markdown_user, [page.data_url]),
-                    ],
-                    **body_extra,
-                }
-                request = {
-                    "custom_id": custom_id,
-                    "method": "POST",
-                    "url": "/v1/chat/completions",
-                    "body": body,
-                }
-                yield custom_id, json.dumps(request)
+                yield (
+                    custom_id,
+                    backend.request_line(custom_id, manifest["model"], profile, page, opts),
+                )
         except Exception as e:  # noqa: BLE001 - one bad file must not sink the whole job
             doc["error"] = f"{type(e).__name__}: {e}"[:300]
             logger.error("Could not render %s: %s", doc["input"], doc["error"])
@@ -200,19 +413,10 @@ def _request_lines(
         doc.pop("error", None)
 
 
-def _start_batch(client, manifest: dict[str, Any], input_file_id: str):
-    return client.batches.create(
-        input_file_id=input_file_id,
-        endpoint="/v1/chat/completions",
-        completion_window="24h",
-        metadata={"tool": "llm-markdownify", "job_id": manifest["job_id"]},
-    )
-
-
 def _submit_lines(
-    client, out_dir: Path, manifest: dict[str, Any], lines: Iterator[tuple[str, str]]
+    backend, out_dir: Path, manifest: dict[str, Any], lines: Iterator[tuple[str, str]]
 ) -> int:
-    """Write requests into size-capped shards, upload each and start one batch per shard."""
+    """Write requests into size-capped shards and start one batch per shard."""
     submitted = 0
     shard_ids: list[str] = []
     shard_bytes = 0
@@ -224,14 +428,18 @@ def _submit_lines(
         nonlocal shard, shard_ids, shard_bytes
         shard.close()
         if shard_ids:
-            with open(shard.name, "rb") as fh:
-                uploaded = client.files.create(file=fh, purpose="batch")
-            # Record the upload before starting the batch: if we crash in between, collect finds
-            # the entry without an id and starts (or adopts) the batch instead of losing pages.
-            entry = {"id": None, "input_file_id": uploaded.id, "requests": len(shard_ids)}
+            input_ref = backend.upload(Path(shard.name))
+            # Record the shard before starting its batch: if we crash in between, collect finds
+            # the entry without an id and adopts (or restarts) the batch instead of losing pages.
+            entry = {
+                "id": None,
+                "input_file_id": input_ref,
+                "requests": len(shard_ids),
+                "started_at": time.time(),
+            }
             manifest["batches"].append(entry)
             _save_manifest(out_dir, manifest)
-            entry["id"] = _start_batch(client, manifest, uploaded.id).id
+            entry["id"] = backend.create(Path(shard.name), input_ref, manifest["job_id"])
             _save_manifest(out_dir, manifest)
             logger.info("Started batch %s with %d page requests", entry["id"], len(shard_ids))
         os.unlink(shard.name)
@@ -259,23 +467,34 @@ def _submit_lines(
     return submitted
 
 
-def _recover_unstarted(client, out_dir: Path, manifest: dict[str, Any]) -> None:
-    """Give every uploaded shard a batch id: adopt the batch if it was created before a crash,
-    otherwise start it now."""
+def _recover_unstarted(backend, out_dir: Path, manifest: dict[str, Any]) -> None:
+    """Resolve shards recorded without a batch id (the process died between the two steps)."""
     unstarted = [b for b in manifest["batches"] if not b.get("id")]
     if not unstarted:
         return
-    existing = {
-        b.input_file_id: b.id
-        for b in client.batches.list(limit=100)
-        if (getattr(b, "metadata", None) or {}).get("job_id") == manifest["job_id"]
-    }
+    known = {b["id"] for b in manifest["batches"] if b.get("id")}
     for entry in unstarted:
-        entry["id"] = existing.get(entry["input_file_id"]) or (
-            _start_batch(client, manifest, entry["input_file_id"]).id
-        )
-        logger.info("Recovered batch %s for upload %s", entry["id"], entry["input_file_id"])
+        found = backend.find_orphan(entry, manifest["job_id"], known)
+        if found:
+            entry["id"] = found
+            known.add(found)
+            logger.info("Recovered batch %s after an interrupted submit", found)
+        elif entry.get("input_file_id"):  # uploaded but never started: start it now
+            entry["id"] = backend.create(Path(), entry["input_file_id"], manifest["job_id"])
+            known.add(entry["id"])
+            logger.info("Started batch %s for an upload an earlier run left behind", entry["id"])
+        else:
+            # Nothing to adopt and nothing uploaded to restart from: forget the shard. Its pages
+            # show as missing and `--retry-failed` resubmits them.
+            logger.warning("Could not recover an interrupted batch; its pages will be retried")
+            entry["dropped"] = True
+    manifest["batches"] = [b for b in manifest["batches"] if not b.get("dropped")]
     _save_manifest(out_dir, manifest)
+
+
+# --------------------------------------------------------------------------------------------
+# Public API
+# --------------------------------------------------------------------------------------------
 
 
 def submit_batch(
@@ -293,9 +512,13 @@ def submit_batch(
     api_base: Optional[str] = None,
     client=None,
 ) -> Path:
-    """Render every page of `inputs` and submit them as OpenAI batch jobs. Returns out_dir."""
+    """Render every page of `inputs` and submit them as batch jobs. Returns out_dir.
+
+    `model` picks the provider: `gpt-...`/`openai/...` use the OpenAI Batch API,
+    `claude-...`/`anthropic/...` use Anthropic Message Batches.
+    """
     out = Path(out_dir)
-    model_name = _openai_model_name(model)  # validate before creating any state
+    provider, model_name = _provider_and_model(model)  # validate before creating any state
     files = expand_inputs(inputs)
     if not files:
         raise ValueError("No input documents found")
@@ -308,6 +531,7 @@ def submit_batch(
     manifest: dict[str, Any] = {
         "version": 1,
         "job_id": uuid.uuid4().hex,
+        "provider": provider,
         "model": model_name,
         "profile": profile or DEFAULT_PROFILE,
         "api_base": api_base,
@@ -328,15 +552,16 @@ def submit_batch(
         "page_errors": {},
     }
     _save_manifest(out, manifest)
-    client = client or _client(api_base)
-    count = _submit_lines(client, out, manifest, _request_lines(manifest))
+    backend = _backend(manifest, client)
+    count = _submit_lines(backend, out, manifest, _request_lines(backend, manifest))
     _save_manifest(out, manifest)  # page counts and render errors were filled in while rendering
     failed_docs = sum(1 for d in manifest["documents"] if d.get("error"))
     logger.info(
-        "Submitted %d pages from %d documents in %d batch(es)%s",
+        "Submitted %d pages from %d documents in %d %s batch(es)%s",
         count,
         len(files) - failed_docs,
         len(manifest["batches"]),
+        provider,
         f"; {failed_docs} document(s) could not be rendered" if failed_docs else "",
     )
     return out
@@ -345,44 +570,32 @@ def submit_batch(
 def batch_status(out_dir: str | Path, client=None) -> BatchStatus:
     out = Path(out_dir)
     manifest = _load_manifest(out)
-    client = client or _client(manifest.get("api_base"))
-    _recover_unstarted(client, out, manifest)
+    backend = _backend(manifest, client)
+    _recover_unstarted(backend, out, manifest)
     rows = []
-    total = completed = failed = 0
     for entry in manifest["batches"]:
-        batch = client.batches.retrieve(entry["id"])
-        counts = batch.request_counts
+        info = backend.info(entry["id"])
         rows.append(
             {
-                "id": batch.id,
-                "status": batch.status,
-                "total": counts.total if counts else entry["requests"],
-                "completed": counts.completed if counts else 0,
-                "failed": counts.failed if counts else 0,
+                "id": info.id,
+                "status": info.status,
+                "done": info.done,
+                "total": info.total or entry["requests"],
+                "completed": info.completed,
+                "failed": info.failed,
+                "error": info.error,
             }
         )
-        total += rows[-1]["total"]
-        completed += rows[-1]["completed"]
-        failed += rows[-1]["failed"]
-    return BatchStatus(batches=rows, total=total, completed=completed, failed=failed)
+    return BatchStatus(
+        batches=rows,
+        total=sum(r["total"] for r in rows),
+        completed=sum(r["completed"] for r in rows),
+        failed=sum(r["failed"] for r in rows),
+    )
 
 
 def _page_path(out: Path, custom_id: str) -> Path:
     return _state(out) / "pages" / f"{custom_id}.md"
-
-
-def _read_jsonl(client, file_id: Optional[str]) -> list[dict[str, Any]]:
-    if not file_id:
-        return []
-    text = client.files.content(file_id).text
-    return [json.loads(line) for line in text.splitlines() if line.strip()]
-
-
-def _batch_error_text(batch) -> str:
-    errors = getattr(batch, "errors", None)
-    data = getattr(errors, "data", None) or []
-    messages = [getattr(e, "message", None) or str(e) for e in data]
-    return "; ".join(m for m in messages if m) or f"batch {batch.status}"
 
 
 def collect_batch(out_dir: str | Path, *, retry_failed: bool = False, client=None) -> CollectResult:
@@ -393,10 +606,9 @@ def collect_batch(out_dir: str | Path, *, retry_failed: bool = False, client=Non
     """
     out = Path(out_dir)
     manifest = _load_manifest(out)
-    manifest.setdefault("page_errors", {})
-    client = client or _client(manifest.get("api_base"))
+    backend = _backend(manifest, client)
     _remove_stale_shards(out)
-    _recover_unstarted(client, out, manifest)
+    _recover_unstarted(backend, out, manifest)
     result = CollectResult()
     (_state(out) / "pages").mkdir(parents=True, exist_ok=True)
 
@@ -405,39 +617,24 @@ def collect_batch(out_dir: str | Path, *, retry_failed: bool = False, client=Non
             if entry.get("error"):
                 result.batch_errors[entry["id"]] = entry["error"]
             continue
-        batch = client.batches.retrieve(entry["id"])
-        if batch.status not in TERMINAL:
+        info = backend.info(entry["id"])
+        if not info.done:
             result.pending_batches += 1
             continue
-        for row in _read_jsonl(client, batch.output_file_id):
-            custom_id = row["custom_id"]
-            response = row.get("response") or {}
-            body = response.get("body") or {}
-            choices = body.get("choices") or []
-            choice = choices[0] if choices else {}
-            content = (choice.get("message") or {}).get("content")
-            finish_reason = choice.get("finish_reason")
-            has_text = bool(content and content.strip())
-            # Empty text that finished normally is a blank page (or one holding only the headers
-            # and footers we asked the model to drop): a correct answer, not a failure.
-            if response.get("status_code") == 200 and (has_text or finish_reason == "stop"):
-                if finish_reason == "length":
-                    logger.warning("Page %s was truncated at max_tokens", custom_id)
-                text = strip_markdown_fence(content).strip() if has_text else ""
-                _page_path(out, custom_id).write_text(text, encoding="utf-8")
-                manifest["page_errors"].pop(custom_id, None)
-            else:
-                error = row.get("error") or body.get("error") or f"empty ({finish_reason})"
-                manifest["page_errors"][custom_id] = json.dumps(error)[:300]
-        for row in _read_jsonl(client, batch.error_file_id):
-            response_body = (row.get("response") or {}).get("body") or {}
-            error = row.get("error") or response_body.get("error") or "unknown error"
-            manifest["page_errors"][row["custom_id"]] = json.dumps(error)[:300]
-        if batch.status == "failed":  # rejected as a whole (e.g. validation); no per-page rows
-            entry["error"] = _batch_error_text(batch)
-            result.batch_errors[entry["id"]] = entry["error"]
+        for page in backend.results(entry["id"]):
+            if page.text is None:
+                manifest["page_errors"][page.custom_id] = page.error or "failed"
+                continue
+            if page.truncated:
+                logger.warning("Page %s was truncated at max_tokens", page.custom_id)
+            text = strip_markdown_fence(page.text).strip() if page.text.strip() else ""
+            _page_path(out, page.custom_id).write_text(text, encoding="utf-8")
+            manifest["page_errors"].pop(page.custom_id, None)
+        if info.error:
+            entry["error"] = info.error
+            result.batch_errors[entry["id"]] = info.error
         entry["collected"] = True
-        entry["status"] = batch.status
+        entry["status"] = info.status
         _save_manifest(out, manifest)
 
     missing_ids: set[str] = set()
@@ -468,7 +665,7 @@ def collect_batch(out_dir: str | Path, *, retry_failed: bool = False, client=Non
     # Only retry pages that are not still queued in an unfinished batch.
     if retry_failed and missing_ids and result.pending_batches == 0:
         result.resubmitted = _submit_lines(
-            client, out, manifest, _request_lines(manifest, wanted=missing_ids)
+            backend, out, manifest, _request_lines(backend, manifest, wanted=missing_ids)
         )
         _save_manifest(out, manifest)
     return result
@@ -483,8 +680,6 @@ def wait_batch(
     whole: that usually fails the same way again, so its error is reported instead.
     """
     out = Path(out_dir)
-    manifest = _load_manifest(out)
-    client = client or _client(manifest.get("api_base"))
     retried = False
     while True:
         status = batch_status(out, client=client)
@@ -495,7 +690,7 @@ def wait_batch(
             status.failed,
         )
         if status.done:
-            batch_rejected = any(b["status"] == "failed" for b in status.batches)
+            batch_rejected = any(b["error"] for b in status.batches)
             may_retry = retry_failed and not retried and not batch_rejected
             result = collect_batch(out, retry_failed=may_retry, client=client)
             if result.resubmitted:

@@ -107,10 +107,10 @@ markdownify input.pdf -o output.md --model openai/<model-name> --api-base http:/
 ## Large jobs, low latency
 
 Thousands of documents and no one waiting? `markdownify-batch` sends them through the OpenAI Batch
-API at about half the price, finished within 24 hours:
+API or Anthropic Message Batches at about half the price, finished within 24 hours:
 
 ```bash
-markdownify-batch submit ./archive -o ./archive-md --model gpt-5.4-mini
+markdownify-batch submit ./archive -o ./archive-md --model gpt-5.4-mini   # or anthropic/claude-opus-5
 markdownify-batch status ./archive-md
 markdownify-batch collect ./archive-md --retry-failed
 ```
@@ -121,7 +121,8 @@ Someone waiting on the answer? Use a fast model and skip the cross-page check:
 markdownify doc.pdf -o doc.md --model gpt-5.4-mini --no-grouping --concurrency 16   # ~5 s per page
 ```
 
-Measured trade-offs between speed, cost, quality and fully local conversion are in
+No API at all? Serve a vision model locally with LM Studio, Ollama, vLLM or llama.cpp and pass
+`--api-base`. Measured speed and quality trade-offs, and the local setup guide, are in
 [docs/speed-and-cost.md](docs/speed-and-cost.md).
 
 ## Built for production

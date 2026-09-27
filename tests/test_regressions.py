@@ -339,3 +339,23 @@ def test_blank_page_returns_empty_markdown_without_retrying(monkeypatch):
     monkeypatch.setattr(litellm, "completion", fake_completion)
     assert llm.generate_markdown("m", ["data:a"], load_prompt_profile("generic")) == ""
     assert len(calls) == 1
+
+
+def test_local_server_works_without_an_api_key(monkeypatch):
+    """LM Studio / Ollama need no key, but the OpenAI client refused to start without one."""
+    seen = {}
+
+    def fake_completion(**kwargs):
+        seen.update(kwargs)
+        return _response("# local")
+
+    monkeypatch.setattr(litellm, "completion", fake_completion)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    llm.configure_llm(llm_kwargs={"api_base": "http://localhost:1234/v1"})
+    llm.generate_markdown("openai/qwen3.5-9b", ["data:a"], load_prompt_profile("generic"))
+    assert seen["api_key"] == "not-needed"
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-real")
+    seen.clear()
+    llm.generate_markdown("openai/qwen3.5-9b", ["data:b"], load_prompt_profile("generic"))
+    assert "api_key" not in seen  # a real key is left for LiteLLM to pick up

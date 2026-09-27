@@ -71,24 +71,22 @@ The library should work well called from a script, a service, or an agent's shel
   when needed; or single-pass conversion with the previous page's tail as context and table stitching in
   code.
 - **Adaptive resolution.** Start at a lower pixel cap and escalate for dense or tiny text pages.
-- **Batch mode**: done for OpenAI (`markdownify-batch`). Next: Anthropic Message Batches, a cost
-  estimate (`--dry-run`) before a big run, and cross-page table stitching in batch output.
+- **Batch mode**: done for OpenAI and Anthropic (`markdownify-batch`). Next: a cost estimate
+  (`--dry-run`) before a big run, and cross-page table stitching in batch output.
 - **Prompt caching** on providers that need explicit markers (Anthropic `cache_control`).
 
 ## Phase 4 - Fully local, no API key
 
-A separate niche: private data, air-gapped, zero cost per page.
+A separate niche: private data, air-gapped, zero cost per page. We do not bundle or manage local
+models: users serve one behind an OpenAI-compatible API (LM Studio, Ollama, vLLM, llama.cpp) and pass
+`--api-base`. The setup guide is in `docs/speed-and-cost.md` (done); key-less local servers work.
 
-- **Local model presets.** Most small document VLMs serve an OpenAI-compatible API (Ollama, LM Studio,
-  vLLM, llama.cpp), so the transport already works through `--api-base`. What is missing is per-model
-  prompts and output parsing. Ship presets like `--preset lightonocr-2`, `--preset qwen3.5-4b`,
-  `--preset paddleocr-vl`, benchmarked on the same subset.
-- **Docling backend** (`pip install llm-markdownify[docling]`, `--backend docling`): fully local pipeline
-  (layout + TableFormer, or granite-docling-258M via MLX on Apple Silicon), plus Office, HTML and EPUB
-  inputs that we do not support today. Measured on our subset (M4, 16 GB): standard pipeline 54.7 at
-  2.5 s/page median (100 on headers/footers, 82.4 tables, 0 math); granite-docling-258M on MLX 48.2 at
-  7.1 s/page. So we position Docling as "local and broad", not "accurate". See docs/speed-and-cost.md.
-- Publish a local-vs-API table: accuracy, pages per minute on a MacBook and on one GPU, cost.
+- **Benchmarked recommendations.** Measure a few general vision models (Qwen-VL family at 4B and 9B)
+  through LM Studio on the olmOCR-Bench subset and publish accuracy and pages per minute on a laptop
+  and on one GPU.
+- **Per-model prompt presets** only if a recommended model needs one.
+- Document-specific models (granite-docling, dots.ocr, olmOCR) emit their own formats; we point to
+  their own tooling (Docling, docling-serve) rather than integrating them.
 
 ## Phase 5 - RAG-ready output
 
