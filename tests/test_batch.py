@@ -14,6 +14,11 @@ from PIL import Image
 from llm_markdownify import batch
 
 
+def _short(custom_id: str) -> str:
+    """'j1a2b3c4d-d0-p1' -> 'd0-p1' (drop the per-job prefix)."""
+    return custom_id.split("-", 1)[1]
+
+
 class FakeOpenAI:
     """In-memory stand-in for the OpenAI files + batches APIs."""
 
@@ -29,6 +34,9 @@ class FakeOpenAI:
         self.batches = SimpleNamespace(
             create=self._create_batch, retrieve=self._retrieve, list=self._list
         )
+
+    def with_options(self, **kwargs):
+        return self
 
     def _create_file(self, file, purpose):
         assert purpose == "batch"
@@ -71,11 +79,12 @@ class FakeOpenAI:
                 continue
             for req in self.uploads[b.input_file_id]:
                 cid = req["custom_id"]
-                if cid in self.fail_ids:
+                if _short(cid) in self.fail_ids:
                     err.append({"custom_id": cid, "error": {"message": "boom"}})
-                    self.fail_ids.discard(cid)  # succeeds when retried
+                    self.fail_ids.discard(_short(cid))  # succeeds when retried
                 else:
-                    text = "" if cid in self.blank_ids else f"```markdown\n# {cid}\n```"
+                    blank = _short(cid) in self.blank_ids
+                    text = "" if blank else f"```markdown\n# {_short(cid)}\n```"
                     ok.append(
                         {
                             "custom_id": cid,
@@ -121,7 +130,7 @@ def test_submit_collect_roundtrip(tmp_path: Path):
 
     batch.submit_batch([docs], out, model="openai/gpt-5.4-mini", client=client)
     [upload] = client.uploads.values()
-    assert [r["custom_id"] for r in upload] == ["d0-p0", "d0-p1", "d1-p0"]
+    assert [_short(r["custom_id"]) for r in upload] == ["d0-p0", "d0-p1", "d1-p0"]
     assert upload[0]["body"]["model"] == "gpt-5.4-mini"
     assert upload[0]["body"]["max_completion_tokens"] == 16000
     assert "temperature" not in upload[0]["body"]
@@ -143,10 +152,10 @@ def test_failed_pages_are_reported_and_retried(tmp_path: Path):
     client.finish_all()
 
     first = batch.collect_batch(out, client=client, retry_failed=True)
-    assert "d0-p1" in first.failed_pages
+    assert "d0-p1" in {_short(k) for k in first.failed_pages}
     assert first.incomplete == {str((out / "a.md").resolve()): [2]}
     assert first.resubmitted == 1
-    assert [r["custom_id"] for r in list(client.uploads.values())[-1]] == ["d0-p1"]
+    assert [_short(r["custom_id"]) for r in list(client.uploads.values())[-1]] == ["d0-p1"]
 
     client.finish_all()
     second = batch.collect_batch(out, client=client)
@@ -254,11 +263,12 @@ def test_error_rows_with_null_body_do_not_crash(tmp_path: Path):
     batch.submit_batch([tmp_path / "a.pdf"], out, client=client)
     b = client.batch_store["batch-0"]
     b.status, b.output_file_id, b.error_file_id = "completed", None, "err"
-    client.contents["err"] = json.dumps({"custom_id": "d0-p0", "response": {"body": None}})
+    cid = client.uploads["file-0"][0]["custom_id"]
+    client.contents["err"] = json.dumps({"custom_id": cid, "response": {"body": None}})
     result = batch.collect_batch(out, client=client)
-    assert "d0-p0" in result.failed_pages
+    assert cid in result.failed_pages
     # the reason survives a second collect
-    assert "d0-p0" in batch.collect_batch(out, client=client).failed_pages
+    assert cid in batch.collect_batch(out, client=client).failed_pages
 
 
 def test_output_names_never_collide(tmp_path: Path):
@@ -304,6 +314,9 @@ class FakeAnthropic:
         )
         self.messages = SimpleNamespace(batches=batches)
 
+    def with_options(self, **kwargs):
+        return self
+
     @staticmethod
     def _counts(processing=0, succeeded=0, errored=0):
         return SimpleNamespace(
@@ -341,7 +354,7 @@ class FakeAnthropic:
     def _results(self, batch_id):
         for req in self.requests[batch_id]:
             cid = req["custom_id"]
-            kind = self.outcomes.get(cid, ("text", f"```markdown\n# {cid}\n```"))
+            kind = self.outcomes.get(_short(cid), ("text", f"```markdown\n# {_short(cid)}\n```"))
             if kind[0] == "errored":
                 error = SimpleNamespace(error=SimpleNamespace(message=kind[1]))
                 yield SimpleNamespace(
@@ -369,7 +382,7 @@ def test_anthropic_request_shape(tmp_path: Path):
     )
     [req] = client.requests["msgbatch_0"]
     params = req["params"]
-    assert req["custom_id"] == "d0-p0"
+    assert _short(req["custom_id"]) == "d0-p0"
     assert params["model"] == "claude-opus-5" and params["max_tokens"] == 16000
     assert "LaTeX" in params["system"]
     image, text = params["messages"][0]["content"]
@@ -396,7 +409,9 @@ def test_anthropic_roundtrip_with_blank_refusal_and_error(tmp_path: Path):
     result = batch.collect_batch(out, client=client)
     assert [p.name for p in result.written] == ["a.md"]
     assert (out / "a.md").read_text() == "# d0-p0\n\ntail\n"  # blank page contributes nothing
-    assert result.failed_pages == {"d1-p0": "model refused this page"}
+    assert {_short(k): v for k, v in result.failed_pages.items()} == {
+        "d1-p0": "model refused this page"
+    }
 
 
 def test_anthropic_errored_rows_are_retried(tmp_path: Path):
@@ -406,8 +421,9 @@ def test_anthropic_errored_rows_are_retried(tmp_path: Path):
     batch.submit_batch([tmp_path / "a.pdf"], out, model="claude-opus-5", client=client)
     client.finish_all()
     first = batch.collect_batch(out, client=client, retry_failed=True)
-    assert first.failed_pages == {"d0-p1": "overloaded"} and first.resubmitted == 1
-    assert [r["custom_id"] for r in client.requests["msgbatch_1"]] == ["d0-p1"]
+    assert {_short(k): v for k, v in first.failed_pages.items()} == {"d0-p1": "overloaded"}
+    assert first.resubmitted == 1
+    assert [_short(r["custom_id"]) for r in client.requests["msgbatch_1"]] == ["d0-p1"]
     client.outcomes.clear()
     client.finish_all()
     assert [p.name for p in batch.collect_batch(out, client=client).written] == ["a.md"]
@@ -424,3 +440,63 @@ def test_anthropic_crash_after_create_is_adopted(tmp_path: Path):
     result = batch.collect_batch(out, client=client)
     assert len(client.store) == 1  # adopted by creation time + request count, not resubmitted
     assert [p.name for p in result.written] == ["a.md"]
+
+
+def test_results_from_another_job_are_ignored(tmp_path: Path):
+    """Crash recovery could adopt a same-sized batch from another job; its rows must not be
+    written into this job's documents."""
+    _pdf(tmp_path / "a.pdf", 1)
+    client = FakeOpenAI()
+    out = tmp_path / "out"
+    batch.submit_batch([tmp_path / "a.pdf"], out, client=client)
+    b = client.batch_store["batch-0"]
+    b.status, b.output_file_id, b.error_file_id = "completed", "out", None
+    foreign = {
+        "custom_id": "jdeadbeef-d0-p0",
+        "response": {
+            "status_code": 200,
+            "body": {
+                "choices": [
+                    {"message": {"content": "someone else's page"}, "finish_reason": "stop"}
+                ]
+            },
+        },
+    }
+    client.contents["out"] = json.dumps(foreign)
+    result = batch.collect_batch(out, client=client)
+    assert not result.written and not (out / "a.md").exists()
+
+
+def test_anthropic_rejects_invalid_effort_before_submitting(tmp_path: Path):
+    _pdf(tmp_path / "a.pdf", 1)
+    client = FakeAnthropic()
+    with pytest.raises(ValueError, match="effort"):
+        batch.submit_batch(
+            [tmp_path / "a.pdf"],
+            tmp_path / "out",
+            model="claude-opus-5",
+            reasoning_effort="none",
+            client=client,
+        )
+    assert not client.store and not (tmp_path / "out").exists()
+
+
+def test_unavailable_results_do_not_stop_collecting_other_batches(tmp_path: Path, monkeypatch):
+    _pdf(tmp_path / "a.pdf", 2)
+    monkeypatch.setattr(batch, "MAX_SHARD_REQUESTS", 1)  # one page per batch
+    client = FakeAnthropic()
+    out = tmp_path / "out"
+    batch.submit_batch([tmp_path / "a.pdf"], out, model="claude-opus-5", client=client)
+    client.finish_all()
+    real_results = client.messages.batches.results
+
+    def results(batch_id):
+        if batch_id == "msgbatch_0":
+            raise RuntimeError("results expired")
+        return real_results(batch_id)
+
+    client.messages.batches.results = results
+    result = batch.collect_batch(out, client=client)
+    assert "msgbatch_0" in result.batch_errors
+    assert {_short(k) for k in result.failed_pages} == set()  # page 1 is missing, page 2 arrived
+    assert result.incomplete == {str((out / "a.md").resolve()): [1]}

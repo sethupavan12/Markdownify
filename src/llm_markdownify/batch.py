@@ -41,6 +41,7 @@ MAX_SHARD_BYTES = 190 * 1024 * 1024
 MAX_SHARD_REQUESTS = 50_000
 
 _BATCHABLE_SUFFIXES = {".pdf"} | IMAGE_SUFFIXES
+_ANTHROPIC_EFFORTS = ("low", "medium", "high", "xhigh", "max")
 
 
 @dataclass
@@ -129,12 +130,18 @@ class _OpenAIBackend:
             return self.client.files.create(file=fh, purpose="batch").id
 
     def create(self, shard: Path, input_ref: Optional[str], job_id: str) -> str:
-        return self.client.batches.create(
-            input_file_id=input_ref,
-            endpoint="/v1/chat/completions",
-            completion_window="24h",
-            metadata={"tool": "llm-markdownify", "job_id": job_id},
-        ).id
+        # One attempt only: an SDK retry after a client-side timeout could start a second batch
+        # that we never record but still pay for. A failed create is left for recovery.
+        return (
+            self.client.with_options(max_retries=0)
+            .batches.create(
+                input_file_id=input_ref,
+                endpoint="/v1/chat/completions",
+                completion_window="24h",
+                metadata={"tool": "llm-markdownify", "job_id": job_id},
+            )
+            .id
+        )
 
     def find_orphan(self, entry: dict, job_id: str, known: set[str]) -> Optional[str]:
         for b in self.client.batches.list(limit=100):
@@ -235,7 +242,8 @@ class _AnthropicBackend:
     def create(self, shard: Path, input_ref: Optional[str], job_id: str) -> str:
         with open(shard, encoding="utf-8") as fh:
             requests = [json.loads(line) for line in fh if line.strip()]
-        return self.client.messages.batches.create(requests=requests).id
+        # One attempt only (see the OpenAI backend): a retried 190 MB POST could double-bill.
+        return self.client.with_options(max_retries=0).messages.batches.create(requests=requests).id
 
     def find_orphan(self, entry: dict, job_id: str, known: set[str]) -> Optional[str]:
         """Anthropic batches carry no metadata, so match on creation time and request count.
@@ -243,11 +251,13 @@ class _AnthropicBackend:
         `--retry-failed` resubmits them."""
         started = entry.get("started_at") or 0
         matches = []
-        for b in self.client.messages.batches.list(limit=50):
-            created = b.created_at.timestamp() if hasattr(b.created_at, "timestamp") else 0
+        for b in self.client.messages.batches.list(limit=50):  # newest first, auto-paginates
+            created = b.created_at.timestamp()
+            if created < started - 60:
+                break  # everything further back is older than our submit
             c = b.request_counts
             total = c.processing + c.succeeded + c.errored + c.canceled + c.expired
-            if b.id not in known and created >= started - 60 and total == entry["requests"]:
+            if b.id not in known and created <= started + 900 and total == entry["requests"]:
                 matches.append(b.id)
         return matches[0] if len(matches) == 1 else None
 
@@ -272,7 +282,8 @@ class _AnthropicBackend:
                 if msg.stop_reason == "refusal":
                     yield PageResult(r.custom_id, None, error="model refused this page")
                 elif text.strip() or msg.stop_reason == "end_turn":
-                    yield PageResult(r.custom_id, text, truncated=msg.stop_reason == "max_tokens")
+                    truncated = msg.stop_reason in {"max_tokens", "model_context_window_exceeded"}
+                    yield PageResult(r.custom_id, text, truncated=truncated)
                 else:
                     yield PageResult(r.custom_id, None, error=f"empty ({msg.stop_reason})")
             elif result.type == "errored":
@@ -369,8 +380,14 @@ def _output_paths(files: list[Path], out_dir: Path) -> list[Path]:
     return outputs
 
 
-def _custom_id(doc: int, page: int) -> str:
-    return f"d{doc}-p{page}"
+def _custom_id(job_id: str, doc: int, page: int) -> str:
+    """Request id for one page. The job prefix means results from any other job's batch can never
+    be mistaken for ours, even if crash recovery adopted the wrong batch."""
+    return f"j{job_id[:8]}-d{doc}-p{page}"
+
+
+def _doc_index(custom_id: str) -> int:
+    return int(custom_id.split("-")[1][1:])
 
 
 def _iter_pages(path: Path, opts: dict[str, Any]) -> Iterator[PageImage]:
@@ -389,7 +406,7 @@ def _request_lines(
     """
     opts = manifest["options"]
     profile = load_prompt_profile(manifest["profile"])
-    wanted_docs = {int(c.split("-")[0][1:]) for c in wanted} if wanted is not None else None
+    wanted_docs = {_doc_index(c) for c in wanted} if wanted is not None else None
 
     for doc_index, doc in enumerate(manifest["documents"]):
         if wanted_docs is not None and doc_index not in wanted_docs:
@@ -398,7 +415,7 @@ def _request_lines(
         try:
             for page in _iter_pages(Path(doc["input"]), opts):
                 count += 1
-                custom_id = _custom_id(doc_index, page.index)
+                custom_id = _custom_id(manifest["job_id"], doc_index, page.index)
                 if wanted is not None and custom_id not in wanted:
                     continue
                 yield (
@@ -519,6 +536,10 @@ def submit_batch(
     """
     out = Path(out_dir)
     provider, model_name = _provider_and_model(model)  # validate before creating any state
+    if provider == "anthropic" and reasoning_effort and reasoning_effort not in _ANTHROPIC_EFFORTS:
+        raise ValueError(
+            f"Anthropic effort must be one of {', '.join(_ANTHROPIC_EFFORTS)}, got '{reasoning_effort}'"
+        )
     files = expand_inputs(inputs)
     if not files:
         raise ValueError("No input documents found")
@@ -621,7 +642,19 @@ def collect_batch(out_dir: str | Path, *, retry_failed: bool = False, client=Non
         if not info.done:
             result.pending_batches += 1
             continue
-        for page in backend.results(entry["id"]):
+        prefix = f"j{manifest['job_id'][:8]}-"
+        try:
+            pages = list(backend.results(entry["id"]))
+        except Exception as e:  # noqa: BLE001 - e.g. results expired; keep collecting the rest
+            entry["error"] = f"could not download results: {type(e).__name__}: {e}"[:300]
+            entry["collected"] = True
+            result.batch_errors[entry["id"]] = entry["error"]
+            _save_manifest(out, manifest)
+            continue
+        for page in pages:
+            if not page.custom_id.startswith(prefix):
+                logger.warning("Ignoring result %s from another job", page.custom_id)
+                continue
             if page.text is None:
                 manifest["page_errors"][page.custom_id] = page.error or "failed"
                 continue
@@ -646,7 +679,7 @@ def collect_batch(out_dir: str | Path, *, retry_failed: bool = False, client=Non
             continue
         texts, missing = [], []
         for page in range(doc["pages"]):
-            custom_id = _custom_id(doc_index, page)
+            custom_id = _custom_id(manifest["job_id"], doc_index, page)
             path = _page_path(out, custom_id)
             if path.exists():
                 texts.append(path.read_text(encoding="utf-8"))
