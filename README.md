@@ -81,11 +81,11 @@ From Python, get the Markdown back directly:
 ```py
 from llm_markdownify import markdownify
 
-result = markdownify("report.pdf", model="gpt-5.4-mini")   # or bytes, a file object, or a URL
-result.markdown          # the whole document
+result = markdownify("report.pdf", model="gpt-5.4-mini")  # or bytes, a file object, or a URL
+result.markdown  # the whole document
 result.page(7).markdown  # one page
-result.failed_pages      # [] when every page converted
-result.usage             # requests, tokens, estimated cost in USD
+result.failed_pages  # [] when every page converted
+result.usage  # requests, tokens, estimated cost in USD
 ```
 
 `convert("input.pdf", "output.md", ...)` writes a file instead, and `amarkdownify()` is the async
@@ -256,7 +256,7 @@ the open-source library and comes with hands-on integration support.
 ```bash
 uv sync --all-extras --dev
 uv run pytest
-uv run ruff check src tests
+uv run ruff check src tests evals scripts
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Maintainers and coding agents: start with [AGENTS.md](AGENTS.md).
