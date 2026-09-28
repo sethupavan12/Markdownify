@@ -7,7 +7,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List
 
-from .llm import LLMSettings, assess_continuation
+from .llm import LLMSettings, assess_continuation, is_fatal
 from .pager import PageImage
 from .logging import get_logger
 from .prompt_profiles import PromptProfile
@@ -45,25 +45,47 @@ def group_pages(
     def _assess_pair(i: int) -> tuple[int, str]:
         a = pages[i]
         b = pages[i + 1]
-        label = assess_continuation(
-            model=model,
-            first_data_url=_get_continuation_url(a),
-            second_data_url=_get_continuation_url(b),
-            profile=profile,
-            settings=settings,
-        )
+        if b.index != a.index + 1:
+            return i, "NONE"  # not neighbours in the source (a page selection skipped some)
+        try:
+            label = assess_continuation(
+                model=model,
+                first_data_url=_get_continuation_url(a),
+                second_data_url=_get_continuation_url(b),
+                profile=profile,
+                settings=settings,
+            )
+        except Exception as e:  # noqa: BLE001
+            if is_fatal(e):
+                raise
+            # Not knowing whether a table continues is no reason to lose the document:
+            # convert the pages separately.
+            logger.warning(
+                "Could not check whether page %d continues onto page %d (%s); converting them "
+                "separately",
+                a.index + 1,
+                b.index + 1,
+                type(e).__name__,
+            )
+            label = "NONE"
         return i, label
 
     with ThreadPoolExecutor(max_workers=workers) as executor:
         futures = {executor.submit(_assess_pair, i): i for i in range(num_pairs)}
-        for future in as_completed(futures):
-            i, label = future.result()
-            labels[i] = label
-            a = pages[i]
-            b = pages[i + 1]
-            logger.info(
-                "Continuation assessment for pages %d->%d: %s", a.index + 1, b.index + 1, label
-            )
+        try:
+            for future in as_completed(futures):
+                i, label = future.result()
+                labels[i] = label
+                a = pages[i]
+                b = pages[i + 1]
+                logger.info(
+                    "Continuation assessment for pages %d->%d: %s", a.index + 1, b.index + 1, label
+                )
+
+        except BaseException:
+            for pending in futures:  # a fatal error: don't pay for the remaining checks
+                pending.cancel()
+            raise
 
     groups: List[List[PageImage]] = []
     current_group: List[PageImage] = [pages[0]]

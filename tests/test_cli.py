@@ -23,9 +23,10 @@ def test_cli_invokes_markdownifier(monkeypatch, tmp_path: Path):
             called["cfg"] = cfg
             called["profile"] = profile
 
-        def run(self):
-            output_md.write_text("# ok\n")
-            return output_md
+        def convert(self, source):
+            from llm_markdownify.result import ConversionResult, Usage
+
+            return ConversionResult("# ok\n", [], Usage(), "m", str(source), 1, 0.0)
 
     monkeypatch.setattr("llm_markdownify.cli.Markdownifier", FakeMarkdownifier)
 

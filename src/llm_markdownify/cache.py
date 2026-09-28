@@ -24,6 +24,12 @@ def _hash_inputs(*args: str) -> str:
     return hashlib.sha256(combined.encode("utf-8")).hexdigest()
 
 
+def default_cache_dir() -> Path:
+    """`$LLM_MARKDOWNIFY_CACHE_DIR`, or `~/.cache/llm-markdownify`."""
+    override = os.environ.get("LLM_MARKDOWNIFY_CACHE_DIR")
+    return Path(override) if override else Path.home() / ".cache" / "llm-markdownify"
+
+
 class ResponseCache:
     """File-based cache for LLM responses."""
 
@@ -32,7 +38,7 @@ class ResponseCache:
         if cache_dir:
             self.cache_dir = cache_dir
         else:
-            self.cache_dir = Path.home() / ".cache" / "llm-markdownify"
+            self.cache_dir = default_cache_dir()
 
         if self.enabled:
             self.cache_dir.mkdir(parents=True, exist_ok=True)

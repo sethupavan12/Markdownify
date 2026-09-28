@@ -20,3 +20,9 @@ def _reset_package_logger():
     package.handlers[:] = saved[0]
     package.setLevel(saved[1])
     package.propagate = saved[2]
+
+
+@pytest.fixture(autouse=True)
+def _isolated_cache_dir(tmp_path, monkeypatch):
+    """The response cache is on by default; keep tests out of the user's real cache."""
+    monkeypatch.setenv("LLM_MARKDOWNIFY_CACHE_DIR", str(tmp_path / "llm-markdownify-cache"))

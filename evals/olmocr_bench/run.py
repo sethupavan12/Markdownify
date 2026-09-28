@@ -62,6 +62,8 @@ def _convert_one(job: tuple[Path, Path, str, dict]) -> tuple[str, float, str | N
     start = time.time()
     error = None
     try:
+        # Cache off unless asked: a repeat run must call the model again to measure run-to-run noise.
+        options = {"enable_cache": False, **options}
         convert(pdf, dst, model=model, log_level="quiet", **options)
     except Exception as e:  # noqa: BLE001 - record and score as a failed page
         error = repr(e)[:300]

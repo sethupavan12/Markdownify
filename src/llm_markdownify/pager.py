@@ -10,7 +10,7 @@ import threading
 from dataclasses import dataclass, field
 from io import BytesIO
 from pathlib import Path
-from typing import Iterator, List, Literal
+from typing import TYPE_CHECKING, Iterable, Iterator, List, Literal, Optional
 
 import pypdfium2 as pdfium
 from PIL import Image, ImageOps
@@ -21,6 +21,9 @@ try:
     from docx2pdf import convert as docx2pdf_convert  # type: ignore
 except Exception:  # pragma: no cover - optional
     docx2pdf_convert = None  # type: ignore
+
+if TYPE_CHECKING:
+    from .sources import Document
 
 logger = get_logger("llm_markdownify.pager")
 
@@ -111,21 +114,31 @@ def _page_from_pil(index: int, img: Image.Image, max_side: int, fmt: ImageFormat
     )
 
 
+def _open_pdf(pdf: Path | bytes):
+    with _PDFIUM_LOCK:
+        return pdfium.PdfDocument(pdf if isinstance(pdf, bytes) else str(pdf))
+
+
 def iter_pdf_pages(
-    pdf_path: Path, dpi: int, max_side: int = 2048, fmt: ImageFormat = "jpeg"
+    pdf_source: Path | bytes,
+    dpi: int,
+    max_side: int = 2048,
+    fmt: ImageFormat = "jpeg",
+    indices: Optional[Iterable[int]] = None,
 ) -> Iterator[PageImage]:
     """Yield PDF pages one at a time, rendered at `dpi` and capped at `max_side` pixels.
 
-    Streaming keeps memory flat for very long documents. The cap matters: vision APIs reject or
-    silently downscale very large images, and large scanned pages at high DPI exceed their limits.
+    `pdf_source` is a path or the PDF's bytes; `indices` (0-based) renders only those pages, and
+    each PageImage keeps its real page index. Streaming keeps memory flat for very long documents.
+    The cap matters: vision APIs reject or silently downscale very large images, and large scanned
+    pages at high DPI exceed their limits.
     """
     logger.info("Rendering PDF pages at %s DPI (max %spx)", dpi, max_side)
-    with _PDFIUM_LOCK:
-        pdf = pdfium.PdfDocument(str(pdf_path))
+    pdf = _open_pdf(pdf_source)
     try:
         with _PDFIUM_LOCK:
             num_pages = len(pdf)
-        for i in range(num_pages):
+        for i in range(num_pages) if indices is None else indices:
             # Hold the lock only while touching PDFium; encoding below runs concurrently.
             with _PDFIUM_LOCK:
                 page = pdf[i]
@@ -154,11 +167,20 @@ def iter_pdf_pages_as_images(
     return list(iter_pdf_pages(pdf_path, dpi, max_side, fmt))
 
 
-def iter_image_pages(path: Path, max_side: int, fmt: ImageFormat) -> Iterator[PageImage]:
-    """Yield the pages of an image file. Multi-frame images (multi-page TIFF) give one per frame."""
-    with Image.open(path) as img:
-        n_frames = getattr(img, "n_frames", 1) if path.suffix.lower() in {".tif", ".tiff"} else 1
-        for i in range(n_frames):
+def _frame_count(img: Image.Image) -> int:
+    # Only TIFF frames are pages; animated GIF/WebP frames are not.
+    return getattr(img, "n_frames", 1) if img.format == "TIFF" else 1
+
+
+def iter_image_pages(
+    source: Path | bytes,
+    max_side: int,
+    fmt: ImageFormat,
+    indices: Optional[Iterable[int]] = None,
+) -> Iterator[PageImage]:
+    """Yield the pages of an image (path or bytes). A multi-page TIFF gives one page per frame."""
+    with Image.open(BytesIO(source) if isinstance(source, bytes) else source) as img:
+        for i in range(_frame_count(img)) if indices is None else indices:
             img.seek(i)
             frame = ImageOps.exif_transpose(img)  # phone photos carry rotation in EXIF
             yield _page_from_pil(i, frame, max_side, fmt)
@@ -166,6 +188,58 @@ def iter_image_pages(path: Path, max_side: int, fmt: ImageFormat) -> Iterator[Pa
 
 def _load_image_pages(path: Path, max_side: int, fmt: ImageFormat) -> List[PageImage]:
     return list(iter_image_pages(path, max_side, fmt))
+
+
+def count_pages(kind: str, source: Path | bytes) -> int:
+    """Number of pages without rendering anything."""
+    if kind == "pdf":
+        pdf = _open_pdf(source)
+        try:
+            with _PDFIUM_LOCK:
+                return len(pdf)
+        finally:
+            with _PDFIUM_LOCK:
+                pdf.close()
+    with Image.open(BytesIO(source) if isinstance(source, bytes) else source) as img:
+        return _frame_count(img)
+
+
+def render_document(
+    doc: "Document",
+    dpi: int,
+    max_side: int = 2048,
+    image_format: ImageFormat = "jpeg",
+    allow_docx: bool = False,
+    pages: Optional[str] = None,
+) -> tuple[int, List[PageImage]]:
+    """Render a Document (from `sources.load_source`). Returns (total pages, rendered pages).
+
+    `pages` is a 1-based selection like "1-5,12,40-"; only those pages are rendered.
+    """
+    from .sources import parse_pages
+
+    with tempfile.TemporaryDirectory(prefix="llm-markdownify-") as tmp:
+        kind: str = doc.kind
+        source: Path | bytes = doc.data if doc.data is not None else doc.path  # type: ignore[assignment]
+        if kind == "docx":
+            if not allow_docx:
+                raise ValueError(
+                    "DOCX not allowed. Prefer exporting DOCX to PDF, or enable --allow-docx "
+                    "(requires Word/COM)."
+                )
+            docx_path = doc.path
+            if docx_path is None:  # bytes: Word needs a file
+                docx_path = Path(tmp) / "input.docx"
+                docx_path.write_bytes(source)  # type: ignore[arg-type]
+            kind, source = "pdf", _docx_to_pdf(docx_path, Path(tmp))
+        total = count_pages(kind, source)
+        indices = parse_pages(pages, total) if pages else None
+        if kind == "pdf":
+            rendered = list(iter_pdf_pages(source, dpi, max_side, image_format, indices))
+        else:
+            rendered = list(iter_image_pages(source, max_side, image_format, indices))
+    logger.info("Loaded %d of %d page(s) from %s", len(rendered), total, doc.name)
+    return total, rendered
 
 
 def _docx_to_pdf(input_path: Path, out_dir: Path) -> Path:

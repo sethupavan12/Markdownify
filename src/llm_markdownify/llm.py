@@ -25,6 +25,7 @@ from tenacity import (
 from .cache import ResponseCache
 from .logging import get_logger
 from .prompt_profiles import PromptProfile
+from .result import UsageCounter
 
 # Soften LiteLLM's heavy logging/cold-storage features which can import proxy/apscheduler
 # and cause shutdown-time errors on some Python versions.
@@ -105,6 +106,7 @@ class LLMSettings:
     rate_limiter: Optional[RateLimiter] = None
     llm_kwargs: dict[str, Any] = field(default_factory=dict)
     cache: ResponseCache = field(default_factory=lambda: ResponseCache(enabled=False))
+    usage: UsageCounter = field(default_factory=UsageCounter)
 
 
 def _hash_content(content: str) -> str:
@@ -126,6 +128,16 @@ def _is_retryable(exc: BaseException) -> bool:
         litellm.ServiceUnavailableError,
     )
     return isinstance(exc, transient)
+
+
+def is_fatal(exc: BaseException) -> bool:
+    """Errors that no other page can avoid either (bad key, no access, unknown model): stop the whole
+    conversion instead of recording a failed page and paying to fail the rest."""
+    import litellm  # type: ignore
+
+    return isinstance(
+        exc, (litellm.AuthenticationError, litellm.PermissionDeniedError, litellm.NotFoundError)
+    )
 
 
 def _stop_after(max_retries: int):
@@ -187,6 +199,7 @@ def _completion_with_retry(
             # the OpenAI client refuses to start without one.
             kwargs["api_key"] = "not-needed"
         resp = _litellm_completion(**kwargs)
+        _record_usage(settings, resp)
         choice = resp["choices"][0]
         content = choice["message"]["content"]
         if not content or not str(content).strip():
@@ -205,6 +218,25 @@ def _completion_with_retry(
         return str(content), choice.get("finish_reason")
 
     return _do_completion()
+
+
+def _record_usage(settings: LLMSettings, resp: Any) -> None:
+    """Add a response's tokens and estimated cost to this conversion's totals."""
+    usage = getattr(resp, "usage", None) or (resp.get("usage") if isinstance(resp, dict) else None)
+    if usage is None:
+        settings.usage.add_response(0, 0, None)
+        return
+    get = usage.get if isinstance(usage, dict) else lambda k, d=None: getattr(usage, k, d)
+    cost: Optional[float]
+    try:
+        import litellm  # type: ignore
+
+        cost = float(litellm.completion_cost(completion_response=resp))
+    except Exception:  # noqa: BLE001 - model missing from the price list, or an odd response
+        cost = None
+    settings.usage.add_response(
+        get("prompt_tokens", 0) or 0, get("completion_tokens", 0) or 0, cost
+    )
 
 
 def _message_with_images(text: str, image_data_urls: List[str]) -> dict:
@@ -286,6 +318,7 @@ def assess_continuation(
     key = _request_key(model, messages, settings.llm_kwargs, task="continuation")
     cached = cache.get(model, key, [])
     if cached is not None:
+        settings.usage.add_cache_hit()
         return cached
 
     # No max_tokens cap: reasoning models spend tokens thinking before answering, and a tiny
@@ -319,6 +352,7 @@ def generate_markdown(
     )
     cached = cache.get(model, key, [])
     if cached is not None:
+        settings.usage.add_cache_hit()
         return cached
 
     content, finish_reason = _completion_with_retry(
