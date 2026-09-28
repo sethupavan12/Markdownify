@@ -7,7 +7,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List
 
-from .llm import assess_continuation
+from .llm import LLMSettings, assess_continuation
 from .pager import PageImage
 from .logging import get_logger
 from .prompt_profiles import PromptProfile
@@ -21,6 +21,7 @@ def group_pages(
     max_group_pages: int,
     enable_grouping: bool,
     profile: PromptProfile,
+    settings: LLMSettings | None = None,
     grouping_concurrency: int | None = None,
 ) -> List[List[PageImage]]:
     if not pages:
@@ -49,6 +50,7 @@ def group_pages(
             first_data_url=_get_continuation_url(a),
             second_data_url=_get_continuation_url(b),
             profile=profile,
+            settings=settings,
         )
         return i, label
 

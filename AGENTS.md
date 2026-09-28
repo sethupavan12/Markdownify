@@ -32,14 +32,14 @@ input (.pdf | .png/.jpg/.jpeg | .docx opt-in)
 | `api.py` | `convert()` - public one-call Python API; builds a `MarkdownifyConfig` |
 | `cli.py` | Typer app with a single command, so usage is `markdownify INPUT -o OUT.md` (no `run` subcommand) |
 | `config.py` | `MarkdownifyConfig` pydantic model: validation and defaults, `LLM_MARKDOWNIFY_MODEL` env default |
-| `markdownifier.py` | `Markdownifier` orchestrator; configures the module-level log/LLM/cache globals, then runs the pipeline |
+| `markdownifier.py` | `Markdownifier` orchestrator; builds this conversion's `LLMSettings`, then runs the pipeline |
 | `pager.py` | Rendering. PDFs via pypdfium2 (under a global lock), images incl. multi-page TIFF. `PageImage` holds encoded bytes plus lazy data URLs (full image, and a 1024px JPEG for grouping) |
 | `grouping.py` | Cross-page continuation detection and grouping |
 | `llm.py` | LiteLLM calls, retries on transient errors only (rate limit, timeout, 5xx, empty answer), token-bucket `RateLimiter`, fence stripping, cache lookups. Silences LiteLLM logging at import |
 | `batch.py` / `batch_cli.py` | Batch mode (`markdownify-batch submit/status/collect/wait`) for OpenAI and Anthropic, via the official `openai` and `anthropic` SDKs (one small backend class each). Job state in `<out>/.markdownify-batch/`; one request per page, no grouping |
 | `cache.py` | Optional file cache of LLM responses (`~/.cache/llm-markdownify`), keyed on model + prompt + image hashes |
 | `prompts.py` / `prompt_profiles.py` | Prompt text. Built-in profiles: `generic` (default) and `contracts` (legal heading rules). Custom profiles are JSON files with `name`, `continuation_system`, `continuation_user`, `markdown_system`, `markdown_user` |
-| `logging.py` | `get_logger` / `set_log_level` (`quiet`/`normal`/`verbose`/`debug`) |
+| `logging.py` | `get_logger`, and `enable_console_logging(level)` for CLI-style stderr output (`quiet`/`normal`/`verbose`/`debug`) |
 
 ## Defaults to know
 
@@ -56,7 +56,13 @@ unless `--model` or `LLM_MARKDOWNIFY_MODEL` is set.
 - Reasoning models spend output tokens on thinking. Never put small `max_tokens` caps on calls, and do
   not send `temperature` unless the user set it.
 - Never let the CLI print local variables on errors (they contain API keys). `pretty_exceptions_show_locals=False`.
-- Retry/rate-limit/cache/log settings are module globals set per `Markdownifier`; tests reset them.
+- Retry, rate-limit, provider options and cache live on an `LLMSettings` object that each
+  `Markdownifier` builds and passes down (`llm.generate_markdown(..., settings=...)`). Never add
+  module-level mutable state: two conversions in one process must not share settings or API keys.
+- The library is silent: modules log via `llm_markdownify.logging.get_logger` to the `llm_markdownify` logger, which
+  only has a `NullHandler`. Console output is opt-in: `enable_console_logging()` for the whole process
+  (the CLIs), `console_logging()` for one call (`convert(log_level=...)`).
+  Never print or add handlers from library code.
 
 ## Dev workflow
 
@@ -93,7 +99,7 @@ about 3 points on a ~100-page subset as noise. See `docs/ROADMAP.md` for current
 
 - Python >= 3.10, full type hints on public functions, ruff line length 100.
 - Keep modules small and focused. No framework-style abstraction layers.
-- Log via `logging.get_logger`. Do not print.
+- Log via `logging.get_logger`. Do not print; the library must stay silent unless the app opts in.
 - Prompts: output must be document content only (no meta commentary). Grouping merges pages only for split
   visual structures (tables, boxed panels, charts), never for plain text continuity.
 - Do not hand-edit generated files (e.g. `uv.lock`); regenerate them with the tool.

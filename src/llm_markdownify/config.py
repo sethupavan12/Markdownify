@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import os
+import warnings
 from pathlib import Path
 from typing import Any, Literal, Optional
 
@@ -114,9 +115,10 @@ class MarkdownifyConfig(BaseModel):
     )
 
     # Logging
-    log_level: LogLevel = Field(
-        "normal",
-        description="Log verbosity: quiet, normal, verbose, debug",
+    log_level: Optional[LogLevel] = Field(
+        None,
+        description="Deprecated: no effect. Use convert(log_level=...) or "
+        "llm_markdownify.logging.enable_console_logging()",
     )
 
     @field_validator("input_path")
@@ -137,6 +139,18 @@ class MarkdownifyConfig(BaseModel):
         if path.suffix.lower() not in {".md", ".markdown"}:
             raise ValueError("output_path must be a .md or .markdown file")
         return path
+
+    @field_validator("log_level")
+    @classmethod
+    def _warn_log_level(cls, value: Optional[str]) -> Optional[str]:
+        if value is not None:
+            warnings.warn(
+                "MarkdownifyConfig.log_level no longer configures logging and will be removed. "
+                "Use convert(log_level=...) or llm_markdownify.logging.enable_console_logging().",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        return value
 
     @model_validator(mode="after")
     def _enforce_pdf_preference(self) -> "MarkdownifyConfig":

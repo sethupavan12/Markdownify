@@ -18,7 +18,6 @@ from typer.testing import CliRunner
 
 from llm_markdownify import llm
 from llm_markdownify.api import convert
-from llm_markdownify.cache import configure_cache
 from llm_markdownify.cli import app
 from llm_markdownify.config import MarkdownifyConfig
 from llm_markdownify.pager import load_document_pages
@@ -29,14 +28,8 @@ def _response(content, finish_reason="stop"):
     return {"choices": [{"message": {"content": content}, "finish_reason": finish_reason}]}
 
 
-@pytest.fixture(autouse=True)
-def _isolated_llm_state():
-    # llm/cache settings are module globals; reset them so tests cannot leak into each other.
-    configure_cache(enabled=False)
-    llm.configure_llm(max_retries=2, retry_delay=0.1)
-    yield
-    llm.configure_llm()
-    configure_cache(enabled=False)
+# Fast retries for tests. Settings are per conversion now, so nothing needs resetting between tests.
+FAST = llm.LLMSettings(max_retries=2, retry_delay=0.1)
 
 
 def _make_pdf(path: Path, pages: int = 3) -> None:
@@ -107,7 +100,9 @@ def test_continuation_check_does_not_cap_tokens(monkeypatch):
 
     monkeypatch.setattr(litellm, "completion", fake_completion)
     profile = load_prompt_profile("generic")
-    assert llm.assess_continuation("m", "data:a", "data:b", profile) == "CONTINUE_NEXT"
+    assert (
+        llm.assess_continuation("m", "data:a", "data:b", profile, settings=FAST) == "CONTINUE_NEXT"
+    )
     assert "max_tokens" not in seen
     assert "temperature" not in seen
 
@@ -122,14 +117,17 @@ def test_empty_content_is_retried_then_fails(monkeypatch):
 
     monkeypatch.setattr(litellm, "completion", fake_completion)
     with pytest.raises(llm.EmptyResponseError):
-        llm.generate_markdown("m", ["data:a"], load_prompt_profile("generic"))
+        llm.generate_markdown("m", ["data:a"], load_prompt_profile("generic"), settings=FAST)
     assert len(calls) == 3  # first attempt + 2 retries
 
 
 def test_empty_content_recovers_on_retry(monkeypatch):
     answers = iter([_response("", None), _response("```markdown\n# ok\n```")])
     monkeypatch.setattr(litellm, "completion", lambda **kw: next(answers))
-    assert llm.generate_markdown("m", ["data:a"], load_prompt_profile("generic")) == "# ok"
+    assert (
+        llm.generate_markdown("m", ["data:a"], load_prompt_profile("generic"), settings=FAST)
+        == "# ok"
+    )
 
 
 def test_auth_errors_are_not_retried(monkeypatch):
@@ -142,7 +140,7 @@ def test_auth_errors_are_not_retried(monkeypatch):
 
     monkeypatch.setattr(litellm, "completion", fake_completion)
     with pytest.raises(litellm.AuthenticationError):
-        llm.generate_markdown("m", ["data:a"], load_prompt_profile("generic"))
+        llm.generate_markdown("m", ["data:a"], load_prompt_profile("generic"), settings=FAST)
     assert len(calls) == 1
 
 
@@ -155,7 +153,10 @@ def test_rate_limit_errors_are_retried(monkeypatch):
         return _response("# fine")
 
     monkeypatch.setattr(litellm, "completion", fake_completion)
-    assert llm.generate_markdown("m", ["data:a"], load_prompt_profile("generic")) == "# fine"
+    assert (
+        llm.generate_markdown("m", ["data:a"], load_prompt_profile("generic"), settings=FAST)
+        == "# fine"
+    )
 
 
 def test_rate_limiter_spreads_concurrent_waiters():
@@ -185,7 +186,7 @@ def test_api_and_cli_share_config_defaults(monkeypatch, tmp_path: Path):
     captured = []
 
     class Fake:
-        def __init__(self, cfg, profile=None):
+        def __init__(self, cfg, profile=None, **kwargs):
             captured.append(cfg)
 
         def run(self):
@@ -267,8 +268,11 @@ def test_rate_limits_retry_on_a_time_budget_not_attempts(monkeypatch):
 
     monkeypatch.setattr(litellm, "completion", fake_completion)
     monkeypatch.setattr(llm, "RATE_LIMIT_BUDGET_S", 30.0)
-    llm.configure_llm(max_retries=2, retry_delay=0.01)
-    assert llm.generate_markdown("m", ["data:a"], load_prompt_profile("generic")) == "# eventually"
+    settings = llm.LLMSettings(max_retries=2, retry_delay=0.01)
+    assert (
+        llm.generate_markdown("m", ["data:a"], load_prompt_profile("generic"), settings=settings)
+        == "# eventually"
+    )
 
 
 def test_rate_limit_budget_is_enforced(monkeypatch):
@@ -277,9 +281,9 @@ def test_rate_limit_budget_is_enforced(monkeypatch):
 
     monkeypatch.setattr(litellm, "completion", fake_completion)
     monkeypatch.setattr(llm, "RATE_LIMIT_BUDGET_S", 0.2)
-    llm.configure_llm(max_retries=2, retry_delay=0.01)
+    settings = llm.LLMSettings(max_retries=2, retry_delay=0.01)
     with pytest.raises(litellm.RateLimitError):
-        llm.generate_markdown("m", ["data:a"], load_prompt_profile("generic"))
+        llm.generate_markdown("m", ["data:a"], load_prompt_profile("generic"), settings=settings)
 
 
 def test_fence_stripping_keeps_documents_that_start_and_end_with_code():
@@ -299,7 +303,7 @@ def test_exhausted_output_budget_fails_fast(monkeypatch):
 
     monkeypatch.setattr(litellm, "completion", fake_completion)
     with pytest.raises(llm.OutputBudgetExhaustedError, match="max-tokens"):
-        llm.generate_markdown("m", ["data:a"], load_prompt_profile("generic"))
+        llm.generate_markdown("m", ["data:a"], load_prompt_profile("generic"), settings=FAST)
     assert len(calls) == 1
 
 
@@ -314,17 +318,17 @@ def test_rate_limits_do_not_use_up_other_retries(monkeypatch):
         return _response("# ok")
 
     monkeypatch.setattr(litellm, "completion", fake_completion)
-    llm.configure_llm(max_retries=1, retry_delay=0.01)
-    assert llm.generate_markdown("m", ["data:a"], load_prompt_profile("generic")) == "# ok"
+    settings = llm.LLMSettings(max_retries=1, retry_delay=0.01)
+    assert (
+        llm.generate_markdown("m", ["data:a"], load_prompt_profile("generic"), settings=settings)
+        == "# ok"
+    )
 
 
 def test_cache_key_ignores_transport_only_kwargs():
-    llm.configure_llm(llm_kwargs={"api_key": "a", "timeout": 5})
-    key_a = llm._request_key("m", [])
-    llm.configure_llm(llm_kwargs={"api_key": "b", "timeout": 9})
-    assert llm._request_key("m", []) == key_a
-    llm.configure_llm(llm_kwargs={"reasoning_effort": "high"})
-    assert llm._request_key("m", []) != key_a
+    key_a = llm._request_key("m", [], {"api_key": "a", "timeout": 5})
+    assert llm._request_key("m", [], {"api_key": "b", "timeout": 9}) == key_a
+    assert llm._request_key("m", [], {"reasoning_effort": "high"}) != key_a
 
 
 def test_blank_page_returns_empty_markdown_without_retrying(monkeypatch):
@@ -337,7 +341,9 @@ def test_blank_page_returns_empty_markdown_without_retrying(monkeypatch):
         return _response("", "stop")
 
     monkeypatch.setattr(litellm, "completion", fake_completion)
-    assert llm.generate_markdown("m", ["data:a"], load_prompt_profile("generic")) == ""
+    assert (
+        llm.generate_markdown("m", ["data:a"], load_prompt_profile("generic"), settings=FAST) == ""
+    )
     assert len(calls) == 1
 
 
@@ -351,11 +357,86 @@ def test_local_server_works_without_an_api_key(monkeypatch):
 
     monkeypatch.setattr(litellm, "completion", fake_completion)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    llm.configure_llm(llm_kwargs={"api_base": "http://localhost:1234/v1"})
-    llm.generate_markdown("openai/qwen3.5-9b", ["data:a"], load_prompt_profile("generic"))
+    settings = llm.LLMSettings(llm_kwargs={"api_base": "http://localhost:1234/v1"})
+    llm.generate_markdown(
+        "openai/qwen3.5-9b", ["data:a"], load_prompt_profile("generic"), settings=settings
+    )
     assert seen["api_key"] == "not-needed"
 
     monkeypatch.setenv("OPENAI_API_KEY", "sk-real")
     seen.clear()
-    llm.generate_markdown("openai/qwen3.5-9b", ["data:b"], load_prompt_profile("generic"))
+    llm.generate_markdown(
+        "openai/qwen3.5-9b", ["data:b"], load_prompt_profile("generic"), settings=settings
+    )
     assert "api_key" not in seen  # a real key is left for LiteLLM to pick up
+
+
+def test_concurrent_conversions_keep_their_own_settings(monkeypatch):
+    """Retry, rate-limit and provider settings used to be process-wide, so two conversions running
+    at once in one app could send requests with each other's API key."""
+    seen: list[tuple[str, str]] = []
+    lock = threading.Lock()
+
+    def fake_completion(**kwargs):
+        time.sleep(0.05)  # overlap the two conversions
+        with lock:
+            seen.append(
+                (kwargs["messages"][1]["content"][1]["image_url"]["url"], kwargs["api_key"])
+            )
+        return _response("# ok")
+
+    monkeypatch.setattr(litellm, "completion", fake_completion)
+    profile = load_prompt_profile("generic")
+    settings_a = llm.LLMSettings(llm_kwargs={"api_key": "key-A"})
+    settings_b = llm.LLMSettings(llm_kwargs={"api_key": "key-B"})
+
+    def run(tag, settings):
+        for i in range(5):
+            llm.generate_markdown("m", [f"data:{tag}{i}"], profile, settings=settings)
+
+    threads = [
+        threading.Thread(target=run, args=("A", settings_a)),
+        threading.Thread(target=run, args=("B", settings_b)),
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len(seen) == 10
+    for url, key in seen:
+        assert key == f"key-{url[5]}"  # "data:A3" -> key-A
+
+
+def test_conversions_can_share_one_rate_limiter(tmp_path: Path):
+    from llm_markdownify.markdownifier import Markdownifier
+
+    shared = llm.RateLimiter(rpm=60)
+    pdf = tmp_path / "in.pdf"
+    _make_pdf(pdf, 1)
+    cfg = MarkdownifyConfig(input_path=pdf, output_path=tmp_path / "o.md", rate_limit_rpm=600)
+    first, second = Markdownifier(cfg, rate_limiter=shared), Markdownifier(cfg, rate_limiter=shared)
+    assert first.settings.rate_limiter is second.settings.rate_limiter is shared
+    own_a, own_b = Markdownifier(cfg), Markdownifier(cfg)
+    assert own_a.settings.rate_limiter is not own_b.settings.rate_limiter
+
+
+def test_convert_without_log_level_prints_nothing(monkeypatch, tmp_path: Path, capsys):
+    """The library stays silent unless asked; `log_level` opts in to CLI-style output."""
+    monkeypatch.setattr(litellm, "completion", lambda **kw: _response("# page"))
+    pdf = tmp_path / "in.pdf"
+    _make_pdf(pdf, 2)
+    convert(pdf, tmp_path / "out.md", enable_grouping=False)
+    out, err = capsys.readouterr()
+    assert out == "" and err == ""
+    assert (tmp_path / "out.md").read_text() == "# page\n\n# page\n"
+
+
+def test_convert_log_level_applies_to_that_call_only(monkeypatch, tmp_path: Path, capsys):
+    monkeypatch.setattr(litellm, "completion", lambda **kw: _response("# page"))
+    pdf = tmp_path / "in.pdf"
+    _make_pdf(pdf, 1)
+    convert(pdf, tmp_path / "a.md", enable_grouping=False, log_level="normal")
+    assert "Wrote Markdown" in capsys.readouterr().err
+    convert(pdf, tmp_path / "b.md", enable_grouping=False)  # no log_level: silent again
+    out, err = capsys.readouterr()
+    assert out == "" and err == ""

@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from llm_markdownify.cache import ResponseCache, configure_cache, get_cache
+from llm_markdownify.cache import ResponseCache
 
 
 def test_cache_disabled():
@@ -56,15 +56,6 @@ def test_cache_clear(tmp_path: Path):
 
     assert cache.get("model", "p1", ["i1"]) is None
     assert cache.get("model", "p2", ["i2"]) is None
-
-
-def test_configure_cache_global(tmp_path: Path):
-    """configure_cache sets up the global cache instance."""
-    configure_cache(cache_dir=tmp_path, enabled=True)
-    cache = get_cache()
-
-    assert cache.enabled is True
-    assert cache.cache_dir == tmp_path
 
 
 def test_cache_multiple_images(tmp_path: Path):

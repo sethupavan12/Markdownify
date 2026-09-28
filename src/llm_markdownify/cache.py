@@ -95,22 +95,3 @@ class ResponseCache:
                 pass
         logger.info("Cleared %d cache entries", count)
         return count
-
-
-# Default global cache instance (disabled until configured)
-_default_cache: Optional[ResponseCache] = None
-
-
-def get_cache() -> ResponseCache:
-    """Get the global cache instance."""
-    global _default_cache
-    if _default_cache is None:
-        _default_cache = ResponseCache(enabled=False)
-    return _default_cache
-
-
-def configure_cache(cache_dir: Optional[Path] = None, enabled: bool = True) -> ResponseCache:
-    """Configure and return the global cache instance."""
-    global _default_cache
-    _default_cache = ResponseCache(cache_dir=cache_dir, enabled=enabled)
-    return _default_cache

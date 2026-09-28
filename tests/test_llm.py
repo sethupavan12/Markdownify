@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import time
 
-from llm_markdownify.llm import RateLimiter, configure_llm, _hash_content
+from llm_markdownify.llm import LLMSettings, RateLimiter, _hash_content
 
 
 def test_hash_content_deterministic():
@@ -56,7 +56,10 @@ def test_rate_limiter_low_limit():
     assert elapsed < 2.0
 
 
-def test_configure_llm_sets_globals():
-    """configure_llm sets the global configuration."""
-    configure_llm(max_retries=5, retry_delay=2.0, rate_limit_rpm=100)
-    # Just verify it doesn't raise - actual values are internal
+def test_default_settings():
+    """Each conversion gets fresh settings: sensible retries, no rate limit, cache off."""
+    settings = LLMSettings()
+    assert settings.max_retries == 5
+    assert settings.rate_limiter is None
+    assert settings.cache.enabled is False
+    assert LLMSettings().llm_kwargs is not settings.llm_kwargs  # never shared between instances

@@ -4,17 +4,20 @@
 
 from __future__ import annotations
 
+import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import nullcontext
 from pathlib import Path
 from typing import List, Tuple
 
 from tqdm import tqdm
+from tqdm.contrib.logging import logging_redirect_tqdm
 
-from .cache import configure_cache
+from .cache import ResponseCache
 from .config import MarkdownifyConfig
 from .grouping import group_pages
-from .llm import configure_llm, generate_markdown
-from .logging import get_logger, set_log_level
+from .llm import LLMSettings, RateLimiter, generate_markdown
+from .logging import PACKAGE_LOGGER, get_logger
 from .pager import PageImage, load_document_pages
 from .prompt_profiles import DEFAULT_PROFILE, PromptProfile, load_prompt_profile
 
@@ -24,25 +27,30 @@ logger = get_logger("llm_markdownify.core")
 class Markdownifier:
     """Orchestrates the conversion of a document into Markdown using a Vision LLM."""
 
-    def __init__(self, config: MarkdownifyConfig, profile: str | None = None) -> None:
+    def __init__(
+        self,
+        config: MarkdownifyConfig,
+        profile: str | None = None,
+        rate_limiter: RateLimiter | None = None,
+        show_progress: bool = False,
+    ) -> None:
+        """`rate_limiter` lets several conversions share one request budget (e.g. one API key);
+        by default each conversion gets its own limiter from `config.rate_limit_rpm`.
+        `show_progress` draws a progress bar on stderr (the CLI turns it on; libraries stay quiet).
+        """
+        self.show_progress = show_progress
         self.config = config
         self.profile: PromptProfile = load_prompt_profile(profile or DEFAULT_PROFILE)
 
-        # Configure logging level
-        set_log_level(config.log_level)
-
-        # Configure LLM retry and rate limiting
-        configure_llm(
+        # This conversion's own settings; nothing here is shared with other conversions.
+        if rate_limiter is None and config.rate_limit_rpm:
+            rate_limiter = RateLimiter(config.rate_limit_rpm)
+        self.settings = LLMSettings(
             max_retries=config.max_retries,
             retry_delay=config.retry_delay,
-            rate_limit_rpm=config.rate_limit_rpm,
-            llm_kwargs=config.llm_kwargs,
-        )
-
-        # Configure caching
-        configure_cache(
-            cache_dir=config.cache_dir,
-            enabled=config.enable_cache,
+            rate_limiter=rate_limiter,
+            llm_kwargs=dict(config.llm_kwargs),
+            cache=ResponseCache(cache_dir=config.cache_dir, enabled=config.enable_cache),
         )
 
     def _render_pages(self) -> List[PageImage]:
@@ -61,6 +69,7 @@ class Markdownifier:
             max_group_pages=self.config.max_group_pages,
             enable_grouping=self.config.enable_grouping,
             profile=self.profile,
+            settings=self.settings,
             grouping_concurrency=(
                 self.config.grouping_concurrency
                 if self.config.grouping_concurrency
@@ -76,6 +85,7 @@ class Markdownifier:
             profile=self.profile,
             temperature=self.config.temperature,
             max_tokens=self.config.max_tokens,
+            settings=self.settings,
         )
 
     def run(self) -> Path:
@@ -93,24 +103,35 @@ class Markdownifier:
                 executor.submit(self._markdown_for_group, group): idx
                 for idx, group in enumerate(groups)
             }
-            progress = tqdm(
-                as_completed(future_to_idx),
-                total=len(groups),
-                desc="LLM groups",
-                disable=self.config.log_level == "quiet",
+            # Log lines print above the bar instead of through it; the bar is always closed.
+            redirect = (
+                logging_redirect_tqdm(loggers=[logging.getLogger(PACKAGE_LOGGER)])
+                if self.show_progress
+                else nullcontext()
             )
-            for future in progress:
-                idx = future_to_idx[future]
-                try:
-                    md = future.result()
-                except Exception:
-                    # Don't keep paying for the remaining groups when the document will fail.
-                    for pending in future_to_idx:
-                        pending.cancel()
-                    first_page = groups[idx][0].index + 1
-                    logger.error("Conversion failed for the group starting at page %d", first_page)
-                    raise
-                results.append((idx, md))
+            with (
+                redirect,
+                tqdm(
+                    as_completed(future_to_idx),
+                    total=len(groups),
+                    desc="LLM groups",
+                    disable=not self.show_progress,
+                ) as progress,
+            ):
+                for future in progress:
+                    idx = future_to_idx[future]
+                    try:
+                        md = future.result()
+                    except Exception:
+                        # Don't keep paying for the remaining groups when the document will fail.
+                        for pending in future_to_idx:
+                            pending.cancel()
+                        first_page = groups[idx][0].index + 1
+                        logger.error(
+                            "Conversion failed for the group starting at page %d", first_page
+                        )
+                        raise
+                    results.append((idx, md))
 
         ordered = [text for _, text in sorted(results, key=lambda t: t[0])]
         output = "\n\n".join(ordered).strip() + "\n"
