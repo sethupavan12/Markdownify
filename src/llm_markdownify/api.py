@@ -8,10 +8,8 @@ from pathlib import Path
 from typing import Any, Literal, Optional
 
 from .config import MarkdownifyConfig
-from .logging import enable_console_logging
+from .logging import LogLevel, console_logging
 from .markdownifier import Markdownifier
-
-LogLevel = Literal["quiet", "normal", "verbose", "debug"]
 
 
 def convert(
@@ -69,7 +67,8 @@ def convert(
     - enable_cache: Enable response caching to avoid redundant LLM calls
     - cache_dir: Directory for response cache (defaults to ~/.cache/llm-markdownify)
     - log_level: None (default) keeps the library silent; your app's logging config decides.
-      'quiet', 'normal', 'verbose' or 'debug' prints progress and logs to stderr like the CLI.
+      'quiet', 'normal', 'verbose' or 'debug' prints progress and logs to stderr like the CLI,
+      for the duration of this call only.
 
     Returns
     - Path to the written Markdown file
@@ -92,14 +91,14 @@ def convert(
         rate_limit_rpm=rate_limit_rpm,
         enable_cache=enable_cache,
         cache_dir=Path(cache_dir) if cache_dir is not None else None,
-        log_level=log_level,
     )
-    if log_level is not None:
-        enable_console_logging(log_level)
     cfg = MarkdownifyConfig(
         input_path=Path(input_path),
         output_path=Path(output_path),
         **{k: v for k, v in options.items() if v is not None},
     )
-    show_progress = log_level is not None and log_level != "quiet"
-    return Markdownifier(cfg, profile=profile, show_progress=show_progress).run()
+    if log_level is None:
+        return Markdownifier(cfg, profile=profile).run()
+    # Console output for this call only; the app's own logging config is left as it was.
+    with console_logging(log_level):
+        return Markdownifier(cfg, profile=profile, show_progress=log_level != "quiet").run()

@@ -6,7 +6,14 @@ from __future__ import annotations
 
 import logging
 
-from llm_markdownify.logging import PACKAGE_LOGGER, enable_console_logging, get_logger
+import threading
+
+from llm_markdownify.logging import (
+    PACKAGE_LOGGER,
+    console_logging,
+    enable_console_logging,
+    get_logger,
+)
 
 
 def _console_handlers():
@@ -48,3 +55,38 @@ def test_get_logger_adds_no_handlers():
     logger = get_logger("llm_markdownify.some_module")
     assert logger.handlers == []
     assert logger.propagate is True
+
+
+def test_console_logging_block_restores_the_logger(capsys):
+    package = logging.getLogger(PACKAGE_LOGGER)
+    before = (list(package.handlers), package.level, package.propagate)
+    with console_logging("normal"):
+        get_logger("llm_markdownify.core").info("inside")
+    get_logger("llm_markdownify.core").warning("after")
+    _, err = capsys.readouterr()
+    assert "inside" in err and "after" not in err
+    assert (list(package.handlers), package.level, package.propagate) == before
+
+
+def test_console_logging_block_keeps_app_handlers_working(caplog):
+    """A per-call opt-in must not hide records from the app's own logging setup."""
+    with caplog.at_level(logging.INFO), console_logging("normal"):
+        get_logger("llm_markdownify.core").info("to the app too")
+    assert "to the app too" in caplog.text
+
+
+def test_overlapping_console_logging_blocks_restore_cleanly():
+    package = logging.getLogger(PACKAGE_LOGGER)
+    before = (list(package.handlers), package.level)
+    started = threading.Barrier(2)
+
+    def run(level):
+        with console_logging(level):
+            started.wait()
+
+    threads = [threading.Thread(target=run, args=(lvl,)) for lvl in ("quiet", "verbose")]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert (list(package.handlers), package.level) == before

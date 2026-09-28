@@ -32,7 +32,7 @@ input (.pdf | .png/.jpg/.jpeg | .docx opt-in)
 | `api.py` | `convert()` - public one-call Python API; builds a `MarkdownifyConfig` |
 | `cli.py` | Typer app with a single command, so usage is `markdownify INPUT -o OUT.md` (no `run` subcommand) |
 | `config.py` | `MarkdownifyConfig` pydantic model: validation and defaults, `LLM_MARKDOWNIFY_MODEL` env default |
-| `markdownifier.py` | `Markdownifier` orchestrator; configures the module-level log/LLM/cache globals, then runs the pipeline |
+| `markdownifier.py` | `Markdownifier` orchestrator; builds this conversion's `LLMSettings`, then runs the pipeline |
 | `pager.py` | Rendering. PDFs via pypdfium2 (under a global lock), images incl. multi-page TIFF. `PageImage` holds encoded bytes plus lazy data URLs (full image, and a 1024px JPEG for grouping) |
 | `grouping.py` | Cross-page continuation detection and grouping |
 | `llm.py` | LiteLLM calls, retries on transient errors only (rate limit, timeout, 5xx, empty answer), token-bucket `RateLimiter`, fence stripping, cache lookups. Silences LiteLLM logging at import |
@@ -59,8 +59,9 @@ unless `--model` or `LLM_MARKDOWNIFY_MODEL` is set.
 - Retry, rate-limit, provider options and cache live on an `LLMSettings` object that each
   `Markdownifier` builds and passes down (`llm.generate_markdown(..., settings=...)`). Never add
   module-level mutable state: two conversions in one process must not share settings or API keys.
-- The library is silent: modules log via `logging.get_logger` to the `llm_markdownify` logger, which
-  only has a `NullHandler`. Console output is opt-in via `enable_console_logging()` (the CLIs call it).
+- The library is silent: modules log via `llm_markdownify.logging.get_logger` to the `llm_markdownify` logger, which
+  only has a `NullHandler`. Console output is opt-in: `enable_console_logging()` for the whole process
+  (the CLIs), `console_logging()` for one call (`convert(log_level=...)`).
   Never print or add handlers from library code.
 
 ## Dev workflow

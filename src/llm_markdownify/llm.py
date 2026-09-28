@@ -319,7 +319,6 @@ def generate_markdown(
     )
     cached = cache.get(model, key, [])
     if cached is not None:
-        logger.info("Using cached markdown response")
         return cached
 
     content, finish_reason = _completion_with_retry(

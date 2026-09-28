@@ -133,7 +133,6 @@ def run(
         rate_limit_rpm=rate_limit,
         enable_cache=cache,
         cache_dir=Path(cache_dir) if cache_dir else None,
-        log_level=log_level,
     )
     try:
         cfg = MarkdownifyConfig(

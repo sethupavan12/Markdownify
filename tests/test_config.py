@@ -30,7 +30,7 @@ def test_config_defaults(tmp_path: Path):
     assert cfg.retry_delay == 1.0
     assert cfg.rate_limit_rpm is None
     assert cfg.enable_cache is False
-    assert cfg.log_level == "normal"
+    assert cfg.log_level is None  # deprecated field, no longer used
 
 
 def test_config_custom_retry_settings(tmp_path: Path):
@@ -83,19 +83,12 @@ def test_config_cache_settings(tmp_path: Path):
     assert cfg.cache_dir == cache_dir
 
 
-def test_config_log_levels(tmp_path: Path):
-    """Config accepts all log levels."""
+def test_config_log_level_is_deprecated(tmp_path: Path):
+    """log_level on the config no longer does anything, so setting it warns."""
     input_pdf = tmp_path / "test.pdf"
     input_pdf.write_bytes(b"%PDF-1.4\n%EOF\n")
-    output_md = tmp_path / "out.md"
-
-    for level in ["quiet", "normal", "verbose", "debug"]:
-        cfg = MarkdownifyConfig(
-            input_path=input_pdf,
-            output_path=output_md,
-            log_level=level,
-        )
-        assert cfg.log_level == level
+    with pytest.warns(DeprecationWarning, match="no longer configures logging"):
+        MarkdownifyConfig(input_path=input_pdf, output_path=tmp_path / "out.md", log_level="debug")
 
 
 def test_config_invalid_retry_bounds(tmp_path: Path):

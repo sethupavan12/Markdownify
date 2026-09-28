@@ -429,3 +429,14 @@ def test_convert_without_log_level_prints_nothing(monkeypatch, tmp_path: Path, c
     out, err = capsys.readouterr()
     assert out == "" and err == ""
     assert (tmp_path / "out.md").read_text() == "# page\n\n# page\n"
+
+
+def test_convert_log_level_applies_to_that_call_only(monkeypatch, tmp_path: Path, capsys):
+    monkeypatch.setattr(litellm, "completion", lambda **kw: _response("# page"))
+    pdf = tmp_path / "in.pdf"
+    _make_pdf(pdf, 1)
+    convert(pdf, tmp_path / "a.md", enable_grouping=False, log_level="normal")
+    assert "Wrote Markdown" in capsys.readouterr().err
+    convert(pdf, tmp_path / "b.md", enable_grouping=False)  # no log_level: silent again
+    out, err = capsys.readouterr()
+    assert out == "" and err == ""

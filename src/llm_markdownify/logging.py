@@ -14,7 +14,9 @@ from __future__ import annotations
 
 import logging
 import sys
-from typing import Literal
+import threading
+from contextlib import contextmanager
+from typing import Iterator, Literal
 
 LogLevel = Literal["quiet", "normal", "verbose", "debug"]
 
@@ -42,17 +44,31 @@ class _StderrHandler(logging.StreamHandler):
     def stream(self, value) -> None:  # StreamHandler.__init__ assigns it; ignore
         pass
 
+    def setStream(self, stream):  # noqa: N802 - logging API name
+        """Not supported: this handler always follows the current sys.stderr."""
+        raise NotImplementedError("_StderrHandler always writes to the current sys.stderr")
+
 
 def get_logger(name: str) -> logging.Logger:
     """Logger for a module of this package. Adds no handlers: the application decides output."""
     return logging.getLogger(name)
 
 
-def enable_console_logging(level: LogLevel = "normal") -> None:
-    """Print llm-markdownify's logs to stderr, as the command-line tool does.
+def _format_for(numeric: int) -> logging.Formatter:
+    fmt = (
+        "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
+        if numeric <= logging.DEBUG
+        else "%(asctime)s | %(levelname)s | %(message)s"
+    )
+    return logging.Formatter(fmt=fmt, datefmt="%Y-%m-%d %H:%M:%S")
 
-    Safe to call more than once: it reuses its own handler and only updates the level. Stdout is
-    left alone so it can carry Markdown.
+
+def enable_console_logging(level: LogLevel = "normal") -> None:
+    """Print llm-markdownify's logs to stderr for the rest of the process, as the CLIs do.
+
+    Meant for programs that own the process (the command-line tools). Libraries and apps should
+    use their own logging config, or `console_logging()` for a single call. Safe to call more than
+    once: it reuses its own handler and only updates the level. Stdout is left alone.
     """
     package = logging.getLogger(PACKAGE_LOGGER)
     numeric = _LEVEL_MAP.get(level, logging.INFO)
@@ -61,11 +77,41 @@ def enable_console_logging(level: LogLevel = "normal") -> None:
         handler = _StderrHandler()
         handler._markdownify_console = True  # type: ignore[attr-defined]
         package.addHandler(handler)
-    fmt = (
-        "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
-        if numeric <= logging.DEBUG
-        else "%(asctime)s | %(levelname)s | %(message)s"
-    )
-    handler.setFormatter(logging.Formatter(fmt=fmt, datefmt="%Y-%m-%d %H:%M:%S"))
+    handler.setFormatter(_format_for(numeric))
     package.setLevel(numeric)
     package.propagate = False  # avoid printing twice if the app also logs to the console
+
+
+_scoped_lock = threading.Lock()
+_scoped_levels: list[int] = []
+_scoped_state: dict = {}
+
+
+@contextmanager
+def console_logging(level: LogLevel = "normal") -> Iterator[None]:
+    """Print llm-markdownify's logs to stderr only while the block runs, then restore the logger.
+
+    Used by `convert(..., log_level=...)`. It does not stop records from reaching the app's own
+    handlers. Overlapping calls (e.g. from several threads) share one stderr handler; while they
+    overlap, the most verbose requested level applies.
+    """
+    numeric = _LEVEL_MAP.get(level, logging.INFO)
+    package = logging.getLogger(PACKAGE_LOGGER)
+    with _scoped_lock:
+        if not _scoped_levels:
+            handler = _StderrHandler()
+            handler.setFormatter(_format_for(numeric))
+            _scoped_state.update(level=package.level, handler=handler)
+            package.addHandler(handler)
+        _scoped_levels.append(numeric)
+        package.setLevel(min(_scoped_levels))
+    try:
+        yield
+    finally:
+        with _scoped_lock:
+            _scoped_levels.remove(numeric)
+            if _scoped_levels:
+                package.setLevel(min(_scoped_levels))
+            else:
+                package.removeHandler(_scoped_state.pop("handler"))
+                package.setLevel(_scoped_state.pop("level"))

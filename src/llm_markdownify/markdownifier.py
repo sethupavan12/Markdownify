@@ -4,17 +4,20 @@
 
 from __future__ import annotations
 
+import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import nullcontext
 from pathlib import Path
 from typing import List, Tuple
 
 from tqdm import tqdm
+from tqdm.contrib.logging import logging_redirect_tqdm
 
 from .cache import ResponseCache
 from .config import MarkdownifyConfig
 from .grouping import group_pages
 from .llm import LLMSettings, RateLimiter, generate_markdown
-from .logging import get_logger
+from .logging import PACKAGE_LOGGER, get_logger
 from .pager import PageImage, load_document_pages
 from .prompt_profiles import DEFAULT_PROFILE, PromptProfile, load_prompt_profile
 
@@ -100,24 +103,35 @@ class Markdownifier:
                 executor.submit(self._markdown_for_group, group): idx
                 for idx, group in enumerate(groups)
             }
-            progress = tqdm(
-                as_completed(future_to_idx),
-                total=len(groups),
-                desc="LLM groups",
-                disable=not self.show_progress,
+            # Log lines print above the bar instead of through it; the bar is always closed.
+            redirect = (
+                logging_redirect_tqdm(loggers=[logging.getLogger(PACKAGE_LOGGER)])
+                if self.show_progress
+                else nullcontext()
             )
-            for future in progress:
-                idx = future_to_idx[future]
-                try:
-                    md = future.result()
-                except Exception:
-                    # Don't keep paying for the remaining groups when the document will fail.
-                    for pending in future_to_idx:
-                        pending.cancel()
-                    first_page = groups[idx][0].index + 1
-                    logger.error("Conversion failed for the group starting at page %d", first_page)
-                    raise
-                results.append((idx, md))
+            with (
+                redirect,
+                tqdm(
+                    as_completed(future_to_idx),
+                    total=len(groups),
+                    desc="LLM groups",
+                    disable=not self.show_progress,
+                ) as progress,
+            ):
+                for future in progress:
+                    idx = future_to_idx[future]
+                    try:
+                        md = future.result()
+                    except Exception:
+                        # Don't keep paying for the remaining groups when the document will fail.
+                        for pending in future_to_idx:
+                            pending.cancel()
+                        first_page = groups[idx][0].index + 1
+                        logger.error(
+                            "Conversion failed for the group starting at page %d", first_page
+                        )
+                        raise
+                    results.append((idx, md))
 
         ordered = [text for _, text in sorted(results, key=lambda t: t[0])]
         output = "\n\n".join(ordered).strip() + "\n"
