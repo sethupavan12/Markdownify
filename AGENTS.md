@@ -40,7 +40,7 @@ source (path | bytes | file object | URL; PDF, image, .docx opt-in)
 | `grouping.py` | Cross-page continuation detection and grouping |
 | `llm.py` | LiteLLM calls, retries on transient errors only (rate limit, timeout, 5xx, empty answer), token-bucket `RateLimiter`, fence stripping, cache lookups. Silences LiteLLM logging at import |
 | `batch.py` / `batch_cli.py` | Batch mode (`markdownify-batch submit/status/collect/wait`) for OpenAI and Anthropic, via the official `openai` and `anthropic` SDKs (one small backend class each). Job state in `<out>/.markdownify-batch/`; one request per page, no grouping |
-| `cache.py` | Optional file cache of LLM responses (`~/.cache/llm-markdownify`), keyed on model + prompt + image hashes |
+| `cache.py` | File cache of LLM answers, on by default (`$LLM_MARKDOWNIFY_CACHE_DIR` or `~/.cache/llm-markdownify`), keyed on model + prompt + page images + answer-affecting options. Only successful, untruncated answers are cached |
 | `prompts.py` / `prompt_profiles.py` | Prompt text. Built-in profiles: `generic` (default) and `contracts` (legal heading rules). Custom profiles are JSON files with `name`, `continuation_system`, `continuation_user`, `markdown_system`, `markdown_user` |
 | `logging.py` | `get_logger`, and `enable_console_logging(level)` for CLI-style stderr output (`quiet`/`normal`/`verbose`/`debug`) |
 

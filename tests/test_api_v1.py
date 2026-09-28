@@ -111,7 +111,9 @@ def test_markdownify_accepts_a_url(model, tmp_path: Path):
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
         url = f"http://127.0.0.1:{server.server_address[1]}/doc.pdf"
-        result = markdownify(url, model="m")
+        result = markdownify(url, model="m", allow_private_urls=True)
+        with pytest.raises(PermissionError, match="private, local or reserved"):
+            markdownify(url, model="m")  # refused by default
     finally:
         server.shutdown()
     assert result.markdown == "# page 1\n\n# page 2\n"
@@ -227,7 +229,7 @@ def test_parse_pages(spec, expected):
     assert parse_pages(spec, total=5) == expected
 
 
-@pytest.mark.parametrize("spec", ["0", "3-1", "6", "2-9", "", "a-b", "1,,2"])
+@pytest.mark.parametrize("spec", ["0", "3-1", "6", "2-9", "", "a-b", "1,,2", "1 2", "-"])
 def test_parse_pages_rejects_bad_input(spec):
     with pytest.raises(ValueError):
         parse_pages(spec, total=5)
@@ -248,8 +250,8 @@ def test_bad_page_selection_is_rejected_before_any_work(tmp_path: Path):
         (b"\xff\xd8\xff\xe0", "image"),
         (b"RIFF\x00\x00\x00\x00WEBPVP8 ", "image"),
         (b"II*\x00", "image"),
-        (b"PK\x03\x04", "docx"),
         (b"hello world", None),
+        (b"BM just some text", None),  # "BM" alone is not a BMP
     ],
 )
 def test_sniff_kind(head, kind):
@@ -265,3 +267,71 @@ def test_open_ended_page_selection_is_validated_instantly(tmp_path: Path):
     started = time.monotonic()
     MarkdownifyConfig(pages="40-")
     assert time.monotonic() - started < 1.0
+
+
+@pytest.mark.parametrize(
+    "url",
+    ["http://169.254.169.254/latest/meta-data", "http://10.0.0.5/a.pdf", "http://localhost/a.pdf"],
+)
+def test_private_and_metadata_addresses_are_refused(url):
+    from llm_markdownify.sources import _refuse_private_network
+
+    with pytest.raises(PermissionError):
+        _refuse_private_network(url)
+
+
+def test_urls_are_redacted_in_results_and_logs():
+    from llm_markdownify.sources import _redact
+
+    url = "https://user:secret@bucket.s3.amazonaws.com/doc.pdf?X-Amz-Signature=abc#frag"
+    assert _redact(url) == "https://bucket.s3.amazonaws.com/doc.pdf"
+
+
+def test_html_served_at_a_pdf_url_is_refused():
+    from llm_markdownify.sources import _kind_from_content_type
+
+    assert _kind_from_content_type("text/html; charset=utf-8", "https://x.com/doc.pdf") is None
+    assert _kind_from_content_type("image/svg+xml", "https://x.com/a.svg") is None
+    assert _kind_from_content_type("application/octet-stream", "https://x.com/doc.pdf") == "pdf"
+
+
+def test_zip_that_is_not_a_word_document_is_not_docx():
+    import zipfile
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("xl/workbook.xml", "<x/>")
+    assert sniff_kind(buf.getvalue()) is None
+
+
+def test_on_page_error_cancels_queued_pages(model, tmp_path: Path):
+    def explode(page):
+        raise RuntimeError("callback bug")
+
+    with pytest.raises(RuntimeError, match="callback bug"):
+        markdownify(
+            _pdf(tmp_path / "a.pdf", 6),
+            model="m",
+            enable_grouping=False,
+            concurrency=1,
+            on_page=explode,
+        )
+    assert len(model.markdown_calls) <= 2  # the finished page plus at most one in flight
+
+
+def test_cli_page_past_the_end_is_a_usage_error(model, tmp_path: Path):
+    pdf = _pdf(tmp_path / "a.pdf", 2)
+    run = CliRunner().invoke(
+        app, [str(pdf), "-o", str(tmp_path / "b.md"), "--model", "m", "--pages", "5"]
+    )
+    assert run.exit_code == 2
+    assert "past the end" in run.output
+
+
+def test_word_document_zip_is_docx():
+    import zipfile
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("word/document.xml", "<w:document/>")
+    assert sniff_kind(buf.getvalue()) == "docx"

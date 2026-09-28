@@ -28,6 +28,11 @@ class MarkdownifyConfig(BaseModel):
     pages: Optional[str] = Field(
         None, description='1-based page selection, e.g. "1-5,12,40-" (default: all pages)'
     )
+    allow_private_urls: bool = Field(
+        False,
+        description="Allow downloading URLs on private, local or reserved addresses (refused by "
+        "default so untrusted input cannot reach internal services)",
+    )
     strict: bool = Field(
         False,
         description="Fail the whole conversion if any page fails, instead of returning the pages "

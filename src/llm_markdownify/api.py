@@ -33,6 +33,8 @@ _OPTIONS_DOC = """
     - enable_cache, cache_dir: answers are cached on disk by default, so reruns only pay for pages
       that failed or changed ($LLM_MARKDOWNIFY_CACHE_DIR or ~/.cache/llm-markdownify)
     - allow_docx: accept .docx (converted through Microsoft Word)
+    - allow_private_urls: allow URLs on private/local addresses (refused by default). Strings that
+      are not URLs are read as local paths, so only pass trusted strings as `source`.
     - on_page: called with each PageResult as soon as that page is done
     - log_level: None keeps the library silent; 'normal'/'verbose'/'quiet' prints the CLI's
       progress and logs to stderr for this call only
@@ -108,6 +110,7 @@ def markdownify(
     enable_cache: Optional[bool] = None,
     cache_dir: Optional[str | Path] = None,
     allow_docx: Optional[bool] = None,
+    allow_private_urls: Optional[bool] = None,
     on_page: Optional[PageCallback] = None,
     log_level: Optional[LogLevel] = None,
 ) -> ConversionResult:
@@ -168,6 +171,7 @@ def convert(
     enable_cache: Optional[bool] = None,
     cache_dir: Optional[str | Path] = None,
     allow_docx: Optional[bool] = None,
+    allow_private_urls: Optional[bool] = None,
     on_page: Optional[PageCallback] = None,
     log_level: Optional[LogLevel] = None,
 ) -> Path:

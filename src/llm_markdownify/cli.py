@@ -15,6 +15,7 @@ from .config import MarkdownifyConfig
 from .logging import enable_console_logging
 from .logging import get_logger
 from .markdownifier import Markdownifier
+from .sources import PageSelectionError
 
 logger = get_logger("llm_markdownify.cli")
 
@@ -59,6 +60,11 @@ def run(
     ),
     pages: Optional[str] = typer.Option(
         None, "--pages", help='Pages to convert, e.g. "1-5,12,40-" [default: all]'
+    ),
+    allow_private_urls: bool = typer.Option(
+        False,
+        "--allow-private-urls",
+        help="Allow URL input on private or local addresses (refused by default)",
     ),
     strict: bool = typer.Option(
         False,
@@ -150,6 +156,7 @@ def run(
         enable_cache=cache,
         pages=pages,
         strict=strict,
+        allow_private_urls=allow_private_urls,
         cache_dir=Path(cache_dir) if cache_dir else None,
     )
     try:
@@ -169,6 +176,9 @@ def run(
         result = Markdownifier(cfg, profile=profile, show_progress=not quiet).convert(
             cfg.input_path
         )
+    except PageSelectionError as e:  # a bad argument, found once the page count is known
+        typer.secho(f"Error: pages: {e}", err=True, fg=typer.colors.RED)
+        raise typer.Exit(code=2)
     except Exception as e:  # show one clean line; full tracebacks only with --verbose
         if verbose:
             raise

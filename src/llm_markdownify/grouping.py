@@ -72,14 +72,20 @@ def group_pages(
 
     with ThreadPoolExecutor(max_workers=workers) as executor:
         futures = {executor.submit(_assess_pair, i): i for i in range(num_pairs)}
-        for future in as_completed(futures):
-            i, label = future.result()
-            labels[i] = label
-            a = pages[i]
-            b = pages[i + 1]
-            logger.info(
-                "Continuation assessment for pages %d->%d: %s", a.index + 1, b.index + 1, label
-            )
+        try:
+            for future in as_completed(futures):
+                i, label = future.result()
+                labels[i] = label
+                a = pages[i]
+                b = pages[i + 1]
+                logger.info(
+                    "Continuation assessment for pages %d->%d: %s", a.index + 1, b.index + 1, label
+                )
+
+        except BaseException:
+            for pending in futures:  # a fatal error: don't pay for the remaining checks
+                pending.cancel()
+            raise
 
     groups: List[List[PageImage]] = []
     current_group: List[PageImage] = [pages[0]]

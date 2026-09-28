@@ -151,7 +151,12 @@ No API at all? Serve a vision model locally with LM Studio, Ollama, vLLM or llam
 - **Oversized pages are handled.** Page images are capped at 2048 px, below provider limits, so big
   scans don't get rejected.
 - **Re-runs are free.** Answers are cached on disk (`~/.cache/llm-markdownify`, or
-  `$LLM_MARKDOWNIFY_CACHE_DIR`), keyed on the exact page image and prompt. `--no-cache` turns it off.
+  `$LLM_MARKDOWNIFY_CACHE_DIR`), keyed on the exact page image and prompt. The cache holds the
+  converted text of your documents and is never pruned: for confidential documents, turn it off
+  (`--no-cache`, `enable_cache=False`) or delete the folder when you are done.
+- **Safe with untrusted URLs.** URL input refuses private, local and cloud-metadata addresses,
+  including through redirects (`--allow-private-urls` to permit them). Other strings are read as
+  local file paths, so only pass trusted strings as the source.
 - **One bad page does not sink a 300-page document.** It is marked and reported; rerun to fill it in.
 - **Throughput and cost controls:** `--concurrency`, `--rate-limit`, `--max-image-px`,
   `--reasoning-effort`.

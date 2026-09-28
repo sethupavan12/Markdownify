@@ -122,7 +122,7 @@ class Markdownifier:
         """
         started = time.monotonic()
         self.settings.usage = UsageCounter()  # this conversion's totals only
-        doc = load_source(source)
+        doc = load_source(source, allow_private_urls=self.config.allow_private_urls)
         total, pages = render_document(
             doc,
             dpi=self.config.dpi,
@@ -160,29 +160,33 @@ class Markdownifier:
                     disable=not self.show_progress,
                 ) as progress,
             ):
-                for future in progress:
-                    idx = future_to_idx[future]
-                    group = groups[idx]
-                    try:
-                        markdown_by_group[idx] = future.result()
-                    except Exception as e:
-                        if self.config.strict or is_fatal(e):
-                            # Don't keep paying for a document that is going to fail.
-                            for pending in future_to_idx:
-                                pending.cancel()
-                            logger.error("Conversion failed at %s", _pages_label(group))
-                            raise
-                        errors[idx] = e
-                        logger.warning(
-                            "Could not convert %s (%s); continuing with the rest",
-                            _pages_label(group),
-                            type(e).__name__,
-                        )
-                    if self.on_page:
-                        for page_result in self._page_results(
-                            group, markdown_by_group.get(idx, ""), errors.get(idx)
-                        ):
-                            self.on_page(page_result)
+                try:
+                    for future in progress:
+                        idx = future_to_idx[future]
+                        group = groups[idx]
+                        try:
+                            markdown_by_group[idx] = future.result()
+                        except Exception as e:
+                            if self.config.strict or is_fatal(e):
+                                logger.error("Conversion failed at %s", _pages_label(group))
+                                raise
+                            errors[idx] = e
+                            logger.warning(
+                                "Could not convert %s (%s); continuing with the rest",
+                                _pages_label(group),
+                                type(e).__name__,
+                            )
+                        if self.on_page:
+                            for page_result in self._page_results(
+                                group, markdown_by_group.get(idx, ""), errors.get(idx)
+                            ):
+                                self.on_page(page_result)
+                except BaseException:
+                    # Whatever stops us (a fatal error, strict mode, an on_page callback raising,
+                    # Ctrl-C): don't keep paying for queued pages.
+                    for pending in future_to_idx:
+                        pending.cancel()
+                    raise
 
         if len(errors) == len(groups):
             # Nothing usable: surface the real error instead of a document made of placeholders.
