@@ -13,7 +13,13 @@ from pydantic import ValidationError
 from . import __version__
 from .config import MarkdownifyConfig
 from .logging import enable_console_logging
+from .logging import get_logger
 from .markdownifier import Markdownifier
+
+logger = get_logger("llm_markdownify.cli")
+
+# Exit codes: 0 all pages converted, 1 nothing usable, 2 bad arguments, 3 some pages failed.
+EXIT_PARTIAL = 3
 
 app = typer.Typer(
     help=(
@@ -50,6 +56,14 @@ def run(
     ),
     image_format: Optional[str] = typer.Option(
         None, help="Page image encoding: jpeg or png [default: jpeg]"
+    ),
+    pages: Optional[str] = typer.Option(
+        None, "--pages", help='Pages to convert, e.g. "1-5,12,40-" [default: all]'
+    ),
+    strict: bool = typer.Option(
+        False,
+        "--strict",
+        help="Fail if any page fails, instead of writing the rest with the failed pages marked",
     ),
     max_group_pages: Optional[int] = typer.Option(
         None, help="Max pages to merge for continued content [default: 3]"
@@ -94,7 +108,9 @@ def run(
         None, "--rate-limit", help="Max requests per minute (default: no limit)"
     ),
     cache: bool = typer.Option(
-        False, "--cache/--no-cache", help="Enable response caching to avoid redundant LLM calls"
+        True,
+        "--cache/--no-cache",
+        help="Cache answers on disk so a rerun only pays for pages that failed or changed",
     ),
     cache_dir: Optional[str] = typer.Option(
         None, help="Directory for response cache (defaults to ~/.cache/llm-markdownify)"
@@ -132,6 +148,8 @@ def run(
         retry_delay=retry_delay,
         rate_limit_rpm=rate_limit,
         enable_cache=cache,
+        pages=pages,
+        strict=strict,
         cache_dir=Path(cache_dir) if cache_dir else None,
     )
     try:
@@ -148,12 +166,20 @@ def run(
 
     enable_console_logging(log_level)
     try:
-        Markdownifier(cfg, profile=profile, show_progress=not quiet).run()
+        result = Markdownifier(cfg, profile=profile, show_progress=not quiet).convert(
+            cfg.input_path
+        )
     except Exception as e:  # show one clean line; full tracebacks only with --verbose
         if verbose:
             raise
         typer.secho(f"Error: {type(e).__name__}: {e}", err=True, fg=typer.colors.RED)
         raise typer.Exit(code=1)
+    cfg.output_path.write_text(result.markdown, encoding="utf-8")
+    logger.info("Wrote Markdown to %s", cfg.output_path)
+    if result.failed_pages:
+        for warning in result.warnings:
+            typer.secho(f"Warning: {warning}", err=True, fg=typer.colors.YELLOW)
+        raise typer.Exit(code=EXIT_PARTIAL)
 
 
 if __name__ == "__main__":  # pragma: no cover

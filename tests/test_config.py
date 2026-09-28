@@ -29,7 +29,7 @@ def test_config_defaults(tmp_path: Path):
     assert cfg.max_retries == 5
     assert cfg.retry_delay == 1.0
     assert cfg.rate_limit_rpm is None
-    assert cfg.enable_cache is False
+    assert cfg.enable_cache is True  # decision A: on by default
     assert cfg.log_level is None  # deprecated field, no longer used
 
 

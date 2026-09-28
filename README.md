@@ -73,15 +73,28 @@ export OPENAI_API_KEY="sk-..."
 
 markdownify input.pdf -o output.md --model gpt-5.4-mini   # PDF
 markdownify scan.png -o scan.md --model gpt-5.4-mini      # PNG, JPG, WEBP, TIFF (multi-page), BMP, GIF
+markdownify big.pdf -o part.md --pages 1-5,12,40-         # only the pages you need
 ```
 
-From Python:
+From Python, get the Markdown back directly:
 
 ```py
-from llm_markdownify import convert
+from llm_markdownify import markdownify
 
-convert("input.pdf", "output.md", model="gpt-5.4-mini")
+result = markdownify("report.pdf", model="gpt-5.4-mini")   # or bytes, a file object, or a URL
+result.markdown          # the whole document
+result.page(7).markdown  # one page
+result.failed_pages      # [] when every page converted
+result.usage             # requests, tokens, estimated cost in USD
 ```
+
+`convert("input.pdf", "output.md", ...)` writes a file instead, and `amarkdownify()` is the async
+version for web servers.
+
+If a page still fails after retries, the rest of the document is kept: the failed page is marked
+with an HTML comment and listed in `result.failed_pages` (the command exits with code 3). Answers
+are cached on disk, so running the same command again only pays for the pages that failed. Pass
+`strict=True` / `--strict` to fail the whole document instead, or `--no-cache` to skip the cache.
 
 ## Use any provider
 
@@ -137,7 +150,9 @@ No API at all? Serve a vision model locally with LM Studio, Ollama, vLLM or llam
   and never prints your API key.
 - **Oversized pages are handled.** Page images are capped at 2048 px, below provider limits, so big
   scans don't get rejected.
-- **Re-runs are free** with `--cache`: responses are cached on disk and keyed on the exact request.
+- **Re-runs are free.** Answers are cached on disk (`~/.cache/llm-markdownify`, or
+  `$LLM_MARKDOWNIFY_CACHE_DIR`), keyed on the exact page image and prompt. `--no-cache` turns it off.
+- **One bad page does not sink a 300-page document.** It is marked and reported; rerun to fill it in.
 - **Throughput and cost controls:** `--concurrency`, `--rate-limit`, `--max-image-px`,
   `--reasoning-effort`.
 
@@ -154,7 +169,9 @@ No API at all? Serve a vision model locally with LM Studio, Ollama, vLLM or llam
 | `--temperature`, `--max-tokens`, `--reasoning-effort` | provider defaults, 16000 | generation settings |
 | `--api-base` | | any OpenAI-compatible endpoint |
 | `--concurrency`, `--grouping-concurrency`, `--rate-limit` | 4, same, none | throughput |
-| `--cache`, `--cache-dir` | off, `~/.cache/llm-markdownify` | response cache |
+| `--pages` | all | pages to convert, e.g. `1-5,12,40-` |
+| `--strict` | off | fail the whole document if any page fails |
+| `--cache/--no-cache`, `--cache-dir` | on, `~/.cache/llm-markdownify` | response cache |
 | `-q`, `-v`, `--version` | | quiet, verbose, version |
 
 Custom prompts: copy a built-in profile from

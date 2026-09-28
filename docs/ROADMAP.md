@@ -46,7 +46,8 @@ Decisions (2026-09-28): the response cache is on by default so reruns only resen
 library is silent unless the app configures logging (the CLI still prints); phase 2 ships as 1.0.0;
 the MCP server is an optional extra, `llm-markdownify[mcp]`.
 
-Progress: per-conversion settings and silent library logging are done (PR 1).
+Progress: per-conversion settings and silent library logging are done (PR 1). The result object,
+path/bytes/file/URL input, page selection, partial results and the default-on cache are done (PR 2).
 
 The library should work well called from a script, a service, or an agent's shell.
 

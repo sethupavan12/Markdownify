@@ -192,6 +192,11 @@ def test_api_and_cli_share_config_defaults(monkeypatch, tmp_path: Path):
         def run(self):
             return captured[-1].output_path
 
+        def convert(self, source):
+            from llm_markdownify.result import ConversionResult, Usage
+
+            return ConversionResult("# x\n", [], Usage(), "m", str(source), 1, 0.0)
+
     monkeypatch.setattr("llm_markdownify.api.Markdownifier", Fake)
     monkeypatch.setattr("llm_markdownify.cli.Markdownifier", Fake)
     pdf = tmp_path / "in.pdf"
@@ -226,8 +231,17 @@ def test_cli_version():
     assert result.output.strip() == __import__("llm_markdownify").__version__
 
 
-def test_failed_group_cancels_pending_work(monkeypatch, tmp_path: Path):
-    """One failing group used to wait for (and pay for) every other group before raising."""
+@pytest.mark.parametrize(
+    "error,strict",
+    [
+        (litellm.BadRequestError("bad", model="m", llm_provider="openai"), True),
+        (litellm.AuthenticationError("bad key", llm_provider="openai", model="m"), False),
+    ],
+    ids=["strict-mode", "fatal-error"],
+)
+def test_stopping_failures_cancel_pending_work(monkeypatch, tmp_path: Path, error, strict):
+    """With strict=True, or an error no page can avoid (bad key), the rest of the document is not
+    paid for: queued pages are cancelled and nothing is written."""
     from llm_markdownify.markdownifier import Markdownifier
 
     started = []
@@ -235,15 +249,19 @@ def test_failed_group_cancels_pending_work(monkeypatch, tmp_path: Path):
     def fake_generate(**kwargs):
         started.append(1)
         time.sleep(0.2)  # a real LLM call takes a while; cancellation happens meanwhile
-        raise litellm.BadRequestError("bad", model="m", llm_provider="openai")
+        raise error
 
     monkeypatch.setattr("llm_markdownify.markdownifier.generate_markdown", fake_generate)
     pdf = tmp_path / "in.pdf"
     _make_pdf(pdf, 6)
     cfg = MarkdownifyConfig(
-        input_path=pdf, output_path=tmp_path / "o.md", enable_grouping=False, concurrency=1
+        input_path=pdf,
+        output_path=tmp_path / "o.md",
+        enable_grouping=False,
+        concurrency=1,
+        strict=strict,
     )
-    with pytest.raises(litellm.BadRequestError):
+    with pytest.raises(type(error)):
         Markdownifier(cfg).run()
     assert len(started) <= 2  # the failed call plus at most the one already in flight
     assert not (tmp_path / "o.md").exists()

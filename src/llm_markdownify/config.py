@@ -20,10 +20,19 @@ LogLevel = Literal["quiet", "normal", "verbose", "debug"]
 class MarkdownifyConfig(BaseModel):
     """Configuration for the markdownification process."""
 
-    input_path: Path = Field(
-        ..., description="Path to input PDF/DOCX or image file (.png/.jpg/.jpeg)"
+    input_path: Optional[Path] = Field(
+        None,
+        description="Input file for convert()/Markdownifier.run(); markdownify() takes a source instead",
     )
-    output_path: Path = Field(..., description="Path to output Markdown file")
+    output_path: Optional[Path] = Field(None, description="Markdown file written by convert()")
+    pages: Optional[str] = Field(
+        None, description='1-based page selection, e.g. "1-5,12,40-" (default: all pages)'
+    )
+    strict: bool = Field(
+        False,
+        description="Fail the whole conversion if any page fails, instead of returning the pages "
+        "that worked with the failed ones marked",
+    )
 
     dpi: int = Field(
         200,
@@ -106,8 +115,8 @@ class MarkdownifyConfig(BaseModel):
 
     # Caching
     enable_cache: bool = Field(
-        False,
-        description="Enable response caching to avoid redundant LLM calls",
+        True,
+        description="Cache answers on disk, so a rerun only pays for pages that failed or changed",
     )
     cache_dir: Optional[Path] = Field(
         None,
@@ -123,7 +132,9 @@ class MarkdownifyConfig(BaseModel):
 
     @field_validator("input_path")
     @classmethod
-    def _validate_input(cls, path: Path) -> Path:
+    def _validate_input(cls, path: Optional[Path]) -> Optional[Path]:
+        if path is None:
+            return None
         if not path.exists():
             raise ValueError(f"Input file not found: {path}")
         if path.suffix.lower() not in SUPPORTED_SUFFIXES:
@@ -132,13 +143,24 @@ class MarkdownifyConfig(BaseModel):
 
     @field_validator("output_path")
     @classmethod
-    def _validate_output(cls, path: Path) -> Path:
+    def _validate_output(cls, path: Optional[Path]) -> Optional[Path]:
+        if path is None:
+            return None
         parent = path.parent
         if not parent.exists():
             parent.mkdir(parents=True, exist_ok=True)
         if path.suffix.lower() not in {".md", ".markdown"}:
             raise ValueError("output_path must be a .md or .markdown file")
         return path
+
+    @field_validator("pages")
+    @classmethod
+    def _validate_pages(cls, spec: Optional[str]) -> Optional[str]:
+        if spec is not None:
+            from .sources import validate_pages
+
+            validate_pages(spec)  # syntax only; the page count is checked once the file is open
+        return spec
 
     @field_validator("log_level")
     @classmethod
@@ -154,7 +176,8 @@ class MarkdownifyConfig(BaseModel):
 
     @model_validator(mode="after")
     def _enforce_pdf_preference(self) -> "MarkdownifyConfig":
-        if self.input_path.suffix.lower() == ".docx" and not self.allow_docx:
+        docx = self.input_path is not None and self.input_path.suffix.lower() == ".docx"
+        if docx and not self.allow_docx:
             raise ValueError(
                 "DOCX input is not enabled. Prefer exporting to PDF, or rerun with --allow-docx (requires Word/COM)."
             )

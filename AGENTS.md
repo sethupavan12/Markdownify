@@ -16,8 +16,9 @@ Tables become GFM tables, charts become Mermaid, images get text descriptions.
 ## Pipeline
 
 ```
-input (.pdf | .png/.jpg/.jpeg | .docx opt-in)
-  -> pager.load_document_pages      render pages to PNG (pypdfium2), one PageImage per page
+source (path | bytes | file object | URL; PDF, image, .docx opt-in)
+  -> sources.load_source            -> Document (path or bytes, kind sniffed from signature)
+  -> pager.render_document          render the selected pages (pypdfium2), one PageImage each
   -> grouping.group_pages           optional: one LLM call per adjacent page pair asks
                                     CONTINUE_NEXT / NONE (split table/chart); merges up to
                                     max_group_pages consecutive pages into one group
@@ -29,10 +30,12 @@ input (.pdf | .png/.jpg/.jpeg | .docx opt-in)
 
 | File | Role |
 | --- | --- |
-| `api.py` | `convert()` - public one-call Python API; builds a `MarkdownifyConfig` |
+| `api.py` | Public API: `markdownify()` (returns a `ConversionResult`), `amarkdownify()`, `convert()` (writes a file). All build one `MarkdownifyConfig` |
+| `sources.py` | `load_source()` (path/bytes/file/URL -> `Document`), `parse_pages()` / `validate_pages()` for `--pages` |
+| `result.py` | `ConversionResult`, `PageResult`, `Usage`, and the thread-safe per-conversion `UsageCounter` |
 | `cli.py` | Typer app with a single command, so usage is `markdownify INPUT -o OUT.md` (no `run` subcommand) |
 | `config.py` | `MarkdownifyConfig` pydantic model: validation and defaults, `LLM_MARKDOWNIFY_MODEL` env default |
-| `markdownifier.py` | `Markdownifier` orchestrator; builds this conversion's `LLMSettings`, then runs the pipeline |
+| `markdownifier.py` | `Markdownifier.convert(source)` -> `ConversionResult`. Failed page groups are recorded and marked in the Markdown; fatal errors (`llm.is_fatal`) or `strict` stop the run; all groups failing raises |
 | `pager.py` | Rendering. PDFs via pypdfium2 (under a global lock), images incl. multi-page TIFF. `PageImage` holds encoded bytes plus lazy data URLs (full image, and a 1024px JPEG for grouping) |
 | `grouping.py` | Cross-page continuation detection and grouping |
 | `llm.py` | LiteLLM calls, retries on transient errors only (rate limit, timeout, 5xx, empty answer), token-bucket `RateLimiter`, fence stripping, cache lookups. Silences LiteLLM logging at import |
