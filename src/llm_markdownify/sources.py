@@ -41,6 +41,11 @@ class Document:
     data: Optional[bytes] = None
 
 
+def is_url(source: object) -> bool:
+    """True for http(s) URLs, whatever the case of the scheme."""
+    return isinstance(source, str) and urlparse(source.strip()).scheme.lower() in ("http", "https")
+
+
 def _kind_from_suffix(suffix: str) -> Optional[Kind]:
     suffix = suffix.lower()
     if suffix == ".pdf":
@@ -174,7 +179,7 @@ def load_source(source: Source, allow_private_urls: bool = False) -> Document:
         return Document(kind=kind, name=name, data=bytes(data))
 
     text = str(source)
-    if text.startswith(("http://", "https://")):
+    if is_url(text):
         data, content_type = _download(text, allow_private_urls)
         kind = sniff_kind(data) or _kind_from_content_type(content_type, text)
         if kind is None:

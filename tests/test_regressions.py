@@ -458,3 +458,24 @@ def test_convert_log_level_applies_to_that_call_only(monkeypatch, tmp_path: Path
     convert(pdf, tmp_path / "b.md", enable_grouping=False)  # no log_level: silent again
     out, err = capsys.readouterr()
     assert out == "" and err == ""
+
+
+def test_missing_api_key_fails_at_once(monkeypatch, tmp_path: Path):
+    """LiteLLM labels a missing key as InternalServerError; it used to be retried for ~18s."""
+    calls = []
+
+    def no_key(**kwargs):
+        calls.append(1)
+        raise litellm.InternalServerError(
+            "OpenAIException - Missing credentials. Please pass an `api_key`",
+            llm_provider="openai",
+            model="m",
+        )
+
+    monkeypatch.setattr(litellm, "completion", no_key)
+    with pytest.raises(litellm.InternalServerError, match="Missing credentials"):
+        llm.generate_markdown("m", ["data:a"], load_prompt_profile("generic"), settings=FAST)
+    assert len(calls) == 1
+    assert llm.is_fatal(
+        litellm.InternalServerError("Missing credentials", llm_provider="openai", model="m")
+    )

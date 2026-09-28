@@ -33,7 +33,8 @@ source (path | bytes | file object | URL; PDF, image, .docx opt-in)
 | `api.py` | Public API: `markdownify()` (returns a `ConversionResult`), `amarkdownify()`, `convert()` (writes a file). All build one `MarkdownifyConfig` |
 | `sources.py` | `load_source()` (path/bytes/file/URL -> `Document`), `parse_pages()` / `validate_pages()` for `--pages` |
 | `result.py` | `ConversionResult`, `PageResult`, `Usage`, and the thread-safe per-conversion `UsageCounter` |
-| `cli.py` | Typer app with a single command, so usage is `markdownify INPUT -o OUT.md` (no `run` subcommand) |
+| `cli.py` | Typer app with a single command (`markdownify` and `llm-markdownify`, so `uvx llm-markdownify` works). No `-o` prints Markdown to stdout; `--json` prints the result; exit codes 0 ok, 1 nothing usable, 2 bad args, 3 partial. Logs only on stderr |
+| `mcp_server.py` | `markdownify-mcp` (extra `[mcp]`, MCP SDK 2.x `MCPServer`): tools `document_info` and `convert_document` (chunked). Paths confined to `--root` folders (refuses `/` or home as an implicit root), file read once after the check; model override off by default; tool errors re-raised as `ToolError` so agents see the reason |
 | `config.py` | `MarkdownifyConfig` pydantic model: validation and defaults, `LLM_MARKDOWNIFY_MODEL` env default |
 | `markdownifier.py` | `Markdownifier.convert(source)` -> `ConversionResult`. Failed page groups are recorded and marked in the Markdown; fatal errors (`llm.is_fatal`) or `strict` stop the run; all groups failing raises |
 | `pager.py` | Rendering. PDFs via pypdfium2 (under a global lock), images incl. multi-page TIFF. `PageImage` holds encoded bytes plus lazy data URLs (full image, and a 1024px JPEG for grouping) |
@@ -59,6 +60,7 @@ unless `--model` or `LLM_MARKDOWNIFY_MODEL` is set.
 - Reasoning models spend output tokens on thinking. Never put small `max_tokens` caps on calls, and do
   not send `temperature` unless the user set it.
 - Never let the CLI print local variables on errors (they contain API keys). `pretty_exceptions_show_locals=False`.
+- Stdout is data (Markdown, JSON, or the MCP protocol). Nothing else may write to it.
 - Retry, rate-limit, provider options and cache live on an `LLMSettings` object that each
   `Markdownifier` builds and passes down (`llm.generate_markdown(..., settings=...)`). Never add
   module-level mutable state: two conversions in one process must not share settings or API keys.

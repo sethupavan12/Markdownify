@@ -4,6 +4,10 @@
 
 from __future__ import annotations
 
+import json
+import os
+import sys
+
 from pathlib import Path
 from typing import Any, Optional
 
@@ -16,6 +20,7 @@ from .logging import enable_console_logging
 from .logging import get_logger
 from .markdownifier import Markdownifier
 from .sources import PageSelectionError
+from .sources import is_url as source_is_url
 
 logger = get_logger("llm_markdownify.cli")
 
@@ -33,6 +38,23 @@ app = typer.Typer(
 )
 
 
+def _write_stdout(text: str) -> None:
+    """Write as UTF-8 whatever the terminal's locale, and exit quietly if the reader has gone away
+    (e.g. piped into `head`)."""
+    try:
+        buffer = getattr(sys.stdout, "buffer", None)
+        if buffer is not None:
+            buffer.write(text.encode("utf-8"))
+        else:
+            sys.stdout.write(text)
+        sys.stdout.flush()
+    except BrokenPipeError:
+        # Point stdout at devnull so Python's shutdown flush does not raise again.
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull, sys.stdout.fileno())
+        raise typer.Exit(code=0)
+
+
 def _version_callback(value: bool) -> None:
     if value:
         typer.echo(__version__)
@@ -45,7 +67,17 @@ def run(
         ...,
         help="Path to input .pdf (preferred), image, or .docx (with --allow-docx)",
     ),
-    output: str = typer.Option(..., "-o", "--output", help="Output .md path"),
+    output: Optional[str] = typer.Option(
+        None,
+        "-o",
+        "--output",
+        help="Output file. Omit (or use -) to print to stdout; logs always go to stderr.",
+    ),
+    as_json: bool = typer.Option(
+        False,
+        "--json",
+        help="Print the full result as JSON: markdown, per-page results, usage, warnings",
+    ),
     model: Optional[str] = typer.Option(
         None, help="LiteLLM model, e.g. gpt-5.4-mini, azure/<deployment>, gemini/gemini-2.5-flash"
     ),
@@ -160,11 +192,20 @@ def run(
         cache_dir=Path(cache_dir) if cache_dir else None,
     )
     try:
+        is_url = source_is_url(input_path)
         cfg = MarkdownifyConfig(
-            input_path=Path(input_path),
-            output_path=Path(output),
+            input_path=None if is_url else Path(input_path),
             **{k: v for k, v in options.items() if v is not None},
         )
+        to_stdout = output in (None, "-")
+        if (
+            not to_stdout
+            and not as_json
+            and Path(output).suffix.lower() not in (".md", ".markdown")
+        ):
+            raise typer.BadParameter(
+                "must end in .md or .markdown (or use --json)", param_hint="-o"
+            )
     except ValidationError as e:
         for err in e.errors():
             field = ".".join(str(p) for p in err["loc"]) or "input"
@@ -174,7 +215,7 @@ def run(
     enable_console_logging(log_level)
     try:
         result = Markdownifier(cfg, profile=profile, show_progress=not quiet).convert(
-            cfg.input_path
+            input_path if is_url else cfg.input_path
         )
     except PageSelectionError as e:  # a bad argument, found once the page count is known
         typer.secho(f"Error: pages: {e}", err=True, fg=typer.colors.RED)
@@ -184,8 +225,14 @@ def run(
             raise
         typer.secho(f"Error: {type(e).__name__}: {e}", err=True, fg=typer.colors.RED)
         raise typer.Exit(code=1)
-    cfg.output_path.write_text(result.markdown, encoding="utf-8")
-    logger.info("Wrote Markdown to %s", cfg.output_path)
+    text = json.dumps(result.to_dict(), indent=2) + "\n" if as_json else result.markdown
+    if to_stdout:
+        _write_stdout(text)
+    else:
+        out_path = Path(output)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(text, encoding="utf-8")
+        logger.info("Wrote %s to %s", "JSON" if as_json else "Markdown", out_path)
     if result.failed_pages:
         for warning in result.warnings:
             typer.secho(f"Warning: {warning}", err=True, fg=typer.colors.YELLOW)

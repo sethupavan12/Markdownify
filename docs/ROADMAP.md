@@ -48,6 +48,7 @@ the MCP server is an optional extra, `llm-markdownify[mcp]`.
 
 Progress: per-conversion settings and silent library logging are done (PR 1). The result object,
 path/bytes/file/URL input, page selection, partial results and the default-on cache are done (PR 2).
+Stdout and JSON output, exit codes, `uvx llm-markdownify` and the MCP server are done (PR 3).
 
 The library should work well called from a script, a service, or an agent's shell.
 

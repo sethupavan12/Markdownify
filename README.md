@@ -117,6 +117,50 @@ Anything that speaks the OpenAI API works too, including local servers with no k
 markdownify input.pdf -o output.md --model openai/<model-name> --api-base http://localhost:11434/v1
 ```
 
+## Use it from AI agents
+
+**As a tool (MCP server).** Claude Code, Claude Desktop, Cursor and other MCP clients can call
+llm-markdownify directly. The server has two tools: `document_info` (page count, no model call) and
+`convert_document` (converts up to 20 pages per call and says which pages are left, so a long PDF
+does not flood the agent's context).
+
+```bash
+# Claude Code
+claude mcp add markdownify -e OPENAI_API_KEY=sk-... \
+  -- uvx --from "llm-markdownify[mcp]" markdownify-mcp --model gpt-5.4-mini --root ~/Documents
+```
+
+Other clients take the same command in their JSON config:
+
+```json
+{
+  "mcpServers": {
+    "markdownify": {
+      "command": "uvx",
+      "args": ["--from", "llm-markdownify[mcp]", "markdownify-mcp", "--model", "gpt-5.4-mini",
+               "--root", "/Users/you/Documents"],
+      "env": { "OPENAI_API_KEY": "sk-..." }
+    }
+  }
+}
+```
+
+MCP servers do not inherit your shell's environment, so pass the provider key in `env` as above.
+The agent can only read files inside the `--root` folders; without `--root` the server uses the
+folder it starts in, and refuses to start if that is `/` or your home folder. URLs on private or
+local addresses are refused unless you add `--allow-private-urls`, and the agent cannot switch to
+a different (possibly more expensive) model unless you add `--allow-model-override`.
+
+**From the shell.** With no `-o`, the Markdown goes to stdout and logs to stderr, so it pipes:
+
+```bash
+uvx llm-markdownify report.pdf --pages 1-3 | head -50     # nothing to install first
+markdownify report.pdf --json | jq '.failed_pages, .usage' # structured result
+```
+
+Exit codes: `0` every page converted, `1` nothing usable (bad key, unreadable file), `2` bad
+arguments, `3` some pages failed and the rest were written.
+
 ## Large jobs, low latency
 
 Thousands of documents and no one waiting? `markdownify-batch` sends them through the OpenAI Batch
@@ -177,6 +221,9 @@ No API at all? Serve a vision model locally with LM Studio, Ollama, vLLM or llam
 | `--pages` | all | pages to convert, e.g. `1-5,12,40-` |
 | `--strict` | off | fail the whole document if any page fails |
 | `--cache/--no-cache`, `--cache-dir` | on, `~/.cache/llm-markdownify` | response cache |
+| `-o` | stdout | output file (`-` also means stdout) |
+| `--json` | off | print the full result (Markdown, pages, usage) as JSON |
+| `--allow-private-urls` | off | allow URL input on private or local addresses |
 | `-q`, `-v`, `--version` | | quiet, verbose, version |
 
 Custom prompts: copy a built-in profile from

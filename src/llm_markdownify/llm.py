@@ -114,10 +114,21 @@ def _hash_content(content: str) -> str:
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
+def _is_missing_credentials(exc: BaseException) -> bool:
+    # LiteLLM reports a missing API key as an InternalServerError (a 5xx), which would otherwise
+    # be retried for tens of seconds before failing the same way.
+    if not type(exc).__module__.startswith(("litellm", "openai")):
+        return False
+    text = str(exc)
+    return "Missing credentials" in text or "api_key client option must be set" in text
+
+
 def _is_retryable(exc: BaseException) -> bool:
     """Retry transient failures only. Auth, bad-request and not-found errors fail fast."""
     if isinstance(exc, EmptyResponseError):
         return True
+    if _is_missing_credentials(exc):
+        return False
     import litellm  # type: ignore
 
     transient = (
@@ -135,7 +146,7 @@ def is_fatal(exc: BaseException) -> bool:
     conversion instead of recording a failed page and paying to fail the rest."""
     import litellm  # type: ignore
 
-    return isinstance(
+    return _is_missing_credentials(exc) or isinstance(
         exc, (litellm.AuthenticationError, litellm.PermissionDeniedError, litellm.NotFoundError)
     )
 
