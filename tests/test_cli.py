@@ -32,7 +32,7 @@ def test_cli_invokes_markdownifier(monkeypatch, tmp_path: Path):
 
     runner = CliRunner()
     # Single-command app: pass options then positional INPUT_PATH
-    result = runner.invoke(app, ["-o", str(output_md), "--dpi", "150", str(input_pdf)])  # noqa: S607
+    result = runner.invoke(app, ["-o", str(output_md), "--dpi", "150", str(input_pdf)])
 
     assert result.exit_code == 0
     assert output_md.read_text() == "# ok\n"

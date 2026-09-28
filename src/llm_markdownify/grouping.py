@@ -5,25 +5,24 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import List
 
 from .llm import LLMSettings, assess_continuation, is_fatal
-from .pager import PageImage
 from .logging import get_logger
+from .pager import PageImage
 from .prompt_profiles import PromptProfile
 
 logger = get_logger("llm_markdownify.grouping")
 
 
 def group_pages(
-    pages: List[PageImage],
+    pages: list[PageImage],
     model: str,
     max_group_pages: int,
     enable_grouping: bool,
     profile: PromptProfile,
     settings: LLMSettings | None = None,
     grouping_concurrency: int | None = None,
-) -> List[List[PageImage]]:
+) -> list[list[PageImage]]:
     if not pages:
         return []
 
@@ -36,7 +35,7 @@ def group_pages(
         return [[p] for p in pages]
 
     workers = max(1, min(grouping_concurrency or 8, num_pairs))
-    labels: List[str] = ["NONE"] * num_pairs
+    labels: list[str] = ["NONE"] * num_pairs
 
     def _get_continuation_url(page: PageImage) -> str:
         url = getattr(page, "continuation_data_url", None)
@@ -55,7 +54,7 @@ def group_pages(
                 profile=profile,
                 settings=settings,
             )
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             if is_fatal(e):
                 raise
             # Not knowing whether a table continues is no reason to lose the document:
@@ -87,8 +86,8 @@ def group_pages(
                 pending.cancel()
             raise
 
-    groups: List[List[PageImage]] = []
-    current_group: List[PageImage] = [pages[0]]
+    groups: list[list[PageImage]] = []
+    current_group: list[PageImage] = [pages[0]]
     for i in range(num_pairs):
         continues = labels[i] == "CONTINUE_NEXT"
         next_page = pages[i + 1]

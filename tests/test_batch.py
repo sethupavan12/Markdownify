@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -324,14 +325,14 @@ class FakeAnthropic:
         )
 
     def _create(self, requests):
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         batch_id = f"msgbatch_{len(self.store)}"
         self.requests[batch_id] = requests
         self.store[batch_id] = SimpleNamespace(
             id=batch_id,
             processing_status="in_progress",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
             request_counts=self._counts(processing=len(requests)),
         )
         if self.crash_on_create:

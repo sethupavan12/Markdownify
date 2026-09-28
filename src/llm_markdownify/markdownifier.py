@@ -6,10 +6,10 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import nullcontext
 from pathlib import Path
-from typing import Callable, List, Optional
 
 from tqdm import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
@@ -29,12 +29,12 @@ logger = get_logger("llm_markdownify.core")
 PageCallback = Callable[[PageResult], None]
 
 
-def _pages_label(group: List[PageImage]) -> str:
+def _pages_label(group: list[PageImage]) -> str:
     first, last = group[0].index + 1, group[-1].index + 1
     return f"page {first}" if first == last else f"pages {first}-{last}"
 
 
-def failed_marker(group: List[PageImage], error: BaseException) -> str:
+def failed_marker(group: list[PageImage], error: BaseException) -> str:
     """Placeholder left in the Markdown where a page could not be converted. Only the error type is
     included: messages can be long and may echo request details."""
     return (
@@ -52,7 +52,7 @@ class Markdownifier:
         profile: str | None = None,
         rate_limiter: RateLimiter | None = None,
         show_progress: bool = False,
-        on_page: Optional[PageCallback] = None,
+        on_page: PageCallback | None = None,
     ) -> None:
         """`rate_limiter` lets several conversions share one request budget (e.g. one API key);
         by default each conversion gets its own limiter from `config.rate_limit_rpm`.
@@ -75,7 +75,7 @@ class Markdownifier:
             cache=ResponseCache(cache_dir=config.cache_dir, enabled=config.enable_cache),
         )
 
-    def _group_pages(self, pages: List[PageImage]) -> List[List[PageImage]]:
+    def _group_pages(self, pages: list[PageImage]) -> list[list[PageImage]]:
         return group_pages(
             pages=pages,
             model=self.config.model,
@@ -90,7 +90,7 @@ class Markdownifier:
             ),
         )
 
-    def _markdown_for_group(self, group: List[PageImage]) -> str:
+    def _markdown_for_group(self, group: list[PageImage]) -> str:
         image_urls = [p.data_url for p in group]
         return generate_markdown(
             model=self.config.model,
@@ -102,8 +102,8 @@ class Markdownifier:
         )
 
     def _page_results(
-        self, group: List[PageImage], markdown: str, error: Optional[BaseException]
-    ) -> List[PageResult]:
+        self, group: list[PageImage], markdown: str, error: BaseException | None
+    ) -> list[PageResult]:
         first = group[0].index + 1
         error_text = f"{type(error).__name__}: {error}"[:300] if error else None
         results = [
@@ -192,8 +192,8 @@ class Markdownifier:
             # Nothing usable: surface the real error instead of a document made of placeholders.
             raise errors[0]
 
-        parts: List[str] = []
-        page_results: List[PageResult] = []
+        parts: list[str] = []
+        page_results: list[PageResult] = []
         for idx, group in enumerate(groups):
             error = errors.get(idx)
             text = markdown_by_group.get(idx, "")

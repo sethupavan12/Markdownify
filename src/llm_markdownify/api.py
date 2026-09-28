@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 from .config import MarkdownifyConfig
 from .llm import RateLimiter
@@ -43,8 +43,8 @@ _OPTIONS_DOC = """
 
 def _build(
     options: dict[str, Any],
-    input_path: Optional[Path] = None,
-    output_path: Optional[Path] = None,
+    input_path: Path | None = None,
+    output_path: Path | None = None,
 ) -> MarkdownifyConfig:
     if options.get("cache_dir") is not None:
         options["cache_dir"] = Path(options["cache_dir"])
@@ -58,11 +58,11 @@ def _build(
 def _run(
     cfg: MarkdownifyConfig,
     source: Source,
-    profile: Optional[str],
-    rate_limiter: Optional[RateLimiter],
-    on_page: Optional[PageCallback],
-    log_level: Optional[LogLevel],
-    output_path: Optional[Path] = None,
+    profile: str | None,
+    rate_limiter: RateLimiter | None,
+    on_page: PageCallback | None,
+    log_level: LogLevel | None,
+    output_path: Path | None = None,
 ) -> ConversionResult:
     def convert_and_write(show_progress: bool) -> ConversionResult:
         result = Markdownifier(
@@ -89,30 +89,30 @@ def _run(
 def markdownify(
     source: Source,
     *,
-    model: Optional[str] = None,
-    pages: Optional[str] = None,
-    strict: Optional[bool] = None,
-    profile: Optional[str] = None,
-    dpi: Optional[int] = None,
-    max_image_px: Optional[int] = None,
-    image_format: Optional[Literal["jpeg", "png"]] = None,
-    max_group_pages: Optional[int] = None,
-    enable_grouping: Optional[bool] = None,
-    temperature: Optional[float] = None,
-    max_tokens: Optional[int] = None,
-    llm_kwargs: Optional[dict[str, Any]] = None,
-    concurrency: Optional[int] = None,
-    grouping_concurrency: Optional[int] = None,
-    max_retries: Optional[int] = None,
-    retry_delay: Optional[float] = None,
-    rate_limit_rpm: Optional[int] = None,
-    rate_limiter: Optional[RateLimiter] = None,
-    enable_cache: Optional[bool] = None,
-    cache_dir: Optional[str | Path] = None,
-    allow_docx: Optional[bool] = None,
-    allow_private_urls: Optional[bool] = None,
-    on_page: Optional[PageCallback] = None,
-    log_level: Optional[LogLevel] = None,
+    model: str | None = None,
+    pages: str | None = None,
+    strict: bool | None = None,
+    profile: str | None = None,
+    dpi: int | None = None,
+    max_image_px: int | None = None,
+    image_format: Literal["jpeg", "png"] | None = None,
+    max_group_pages: int | None = None,
+    enable_grouping: bool | None = None,
+    temperature: float | None = None,
+    max_tokens: int | None = None,
+    llm_kwargs: dict[str, Any] | None = None,
+    concurrency: int | None = None,
+    grouping_concurrency: int | None = None,
+    max_retries: int | None = None,
+    retry_delay: float | None = None,
+    rate_limit_rpm: int | None = None,
+    rate_limiter: RateLimiter | None = None,
+    enable_cache: bool | None = None,
+    cache_dir: str | Path | None = None,
+    allow_docx: bool | None = None,
+    allow_private_urls: bool | None = None,
+    on_page: PageCallback | None = None,
+    log_level: LogLevel | None = None,
 ) -> ConversionResult:
     options = dict(locals())
     for key in ("source", "profile", "rate_limiter", "on_page", "log_level"):
@@ -150,30 +150,30 @@ def convert(
     input_path: str | Path,
     output_path: str | Path,
     *,
-    model: Optional[str] = None,
-    pages: Optional[str] = None,
-    strict: Optional[bool] = None,
-    profile: Optional[str] = None,
-    dpi: Optional[int] = None,
-    max_image_px: Optional[int] = None,
-    image_format: Optional[Literal["jpeg", "png"]] = None,
-    max_group_pages: Optional[int] = None,
-    enable_grouping: Optional[bool] = None,
-    temperature: Optional[float] = None,
-    max_tokens: Optional[int] = None,
-    llm_kwargs: Optional[dict[str, Any]] = None,
-    concurrency: Optional[int] = None,
-    grouping_concurrency: Optional[int] = None,
-    max_retries: Optional[int] = None,
-    retry_delay: Optional[float] = None,
-    rate_limit_rpm: Optional[int] = None,
-    rate_limiter: Optional[RateLimiter] = None,
-    enable_cache: Optional[bool] = None,
-    cache_dir: Optional[str | Path] = None,
-    allow_docx: Optional[bool] = None,
-    allow_private_urls: Optional[bool] = None,
-    on_page: Optional[PageCallback] = None,
-    log_level: Optional[LogLevel] = None,
+    model: str | None = None,
+    pages: str | None = None,
+    strict: bool | None = None,
+    profile: str | None = None,
+    dpi: int | None = None,
+    max_image_px: int | None = None,
+    image_format: Literal["jpeg", "png"] | None = None,
+    max_group_pages: int | None = None,
+    enable_grouping: bool | None = None,
+    temperature: float | None = None,
+    max_tokens: int | None = None,
+    llm_kwargs: dict[str, Any] | None = None,
+    concurrency: int | None = None,
+    grouping_concurrency: int | None = None,
+    max_retries: int | None = None,
+    retry_delay: float | None = None,
+    rate_limit_rpm: int | None = None,
+    rate_limiter: RateLimiter | None = None,
+    enable_cache: bool | None = None,
+    cache_dir: str | Path | None = None,
+    allow_docx: bool | None = None,
+    allow_private_urls: bool | None = None,
+    on_page: PageCallback | None = None,
+    log_level: LogLevel | None = None,
 ) -> Path:
     options = dict(locals())
     for key in ("input_path", "output_path", "profile", "rate_limiter", "on_page", "log_level"):

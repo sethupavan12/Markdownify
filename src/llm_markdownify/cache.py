@@ -11,7 +11,6 @@ import json
 import os
 import threading
 from pathlib import Path
-from typing import Optional
 
 from .logging import get_logger
 
@@ -33,7 +32,7 @@ def default_cache_dir() -> Path:
 class ResponseCache:
     """File-based cache for LLM responses."""
 
-    def __init__(self, cache_dir: Optional[Path] = None, enabled: bool = True) -> None:
+    def __init__(self, cache_dir: Path | None = None, enabled: bool = True) -> None:
         self.enabled = enabled
         if cache_dir:
             self.cache_dir = cache_dir
@@ -46,7 +45,7 @@ class ResponseCache:
     def _cache_path(self, key: str) -> Path:
         return self.cache_dir / f"{key}.json"
 
-    def get(self, model: str, prompt_hash: str, image_hashes: list[str]) -> Optional[str]:
+    def get(self, model: str, prompt_hash: str, image_hashes: list[str]) -> str | None:
         """Retrieve cached response if exists."""
         if not self.enabled:
             return None

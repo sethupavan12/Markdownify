@@ -6,7 +6,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-
 from llm_markdownify.grouping import group_pages
 from llm_markdownify.prompt_profiles import load_prompt_profile
 

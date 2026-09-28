@@ -15,8 +15,9 @@ from __future__ import annotations
 import logging
 import sys
 import threading
+from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Iterator, Literal
+from typing import Literal
 
 LogLevel = Literal["quiet", "normal", "verbose", "debug"]
 
@@ -44,7 +45,7 @@ class _StderrHandler(logging.StreamHandler):
     def stream(self, value) -> None:  # StreamHandler.__init__ assigns it; ignore
         pass
 
-    def setStream(self, stream):  # noqa: N802 - logging API name
+    def setStream(self, stream):
         """Not supported: this handler always follows the current sys.stderr."""
         raise NotImplementedError("_StderrHandler always writes to the current sys.stderr")
 

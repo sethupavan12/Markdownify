@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import json
 from pathlib import Path
 
@@ -77,5 +78,5 @@ def test_prompt_profile_is_frozen():
     """PromptProfile is immutable (frozen dataclass)."""
     profile = load_prompt_profile("contracts")
 
-    with pytest.raises(Exception):  # FrozenInstanceError
+    with pytest.raises(dataclasses.FrozenInstanceError):
         profile.name = "modified"

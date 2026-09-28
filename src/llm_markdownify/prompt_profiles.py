@@ -7,7 +7,6 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict
 
 from . import prompts as default_prompts
 
@@ -23,7 +22,7 @@ class PromptProfile:
 
 DEFAULT_PROFILE = "generic"
 
-_BUILTIN_PROFILES: Dict[str, PromptProfile] = {
+_BUILTIN_PROFILES: dict[str, PromptProfile] = {
     "contracts": PromptProfile(
         name="contracts",
         continuation_system=default_prompts.CONTINUATION_SYSTEM_PROMPT,

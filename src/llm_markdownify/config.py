@@ -7,12 +7,11 @@ from __future__ import annotations
 import os
 import warnings
 from pathlib import Path
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .pager import SUPPORTED_SUFFIXES
-
 
 LogLevel = Literal["quiet", "normal", "verbose", "debug"]
 
@@ -20,12 +19,12 @@ LogLevel = Literal["quiet", "normal", "verbose", "debug"]
 class MarkdownifyConfig(BaseModel):
     """Configuration for the markdownification process."""
 
-    input_path: Optional[Path] = Field(
+    input_path: Path | None = Field(
         None,
         description="Input file for convert()/Markdownifier.run(); markdownify() takes a source instead",
     )
-    output_path: Optional[Path] = Field(None, description="Markdown file written by convert()")
-    pages: Optional[str] = Field(
+    output_path: Path | None = Field(None, description="Markdown file written by convert()")
+    pages: str | None = Field(
         None, description='1-based page selection, e.g. "1-5,12,40-" (default: all pages)'
     )
     allow_private_urls: bool = Field(
@@ -68,7 +67,7 @@ class MarkdownifyConfig(BaseModel):
         default_factory=lambda: os.getenv("LLM_MARKDOWNIFY_MODEL", "gpt-4.1-mini"),
         description="LiteLLM model name (e.g., gpt-4.1-mini, azure/<deployment>, gemini/gemini-2.5-flash)",
     )
-    temperature: Optional[float] = Field(
+    temperature: float | None = Field(
         None,
         ge=0.0,
         le=2.0,
@@ -89,7 +88,7 @@ class MarkdownifyConfig(BaseModel):
         description="Max concurrent LLM requests when processing page groups",
     )
 
-    grouping_concurrency: Optional[int] = Field(
+    grouping_concurrency: int | None = Field(
         None,
         ge=1,
         le=1000,
@@ -111,7 +110,7 @@ class MarkdownifyConfig(BaseModel):
     )
 
     # Rate limiting
-    rate_limit_rpm: Optional[int] = Field(
+    rate_limit_rpm: int | None = Field(
         None,
         ge=1,
         le=10000,
@@ -123,13 +122,13 @@ class MarkdownifyConfig(BaseModel):
         True,
         description="Cache answers on disk, so a rerun only pays for pages that failed or changed",
     )
-    cache_dir: Optional[Path] = Field(
+    cache_dir: Path | None = Field(
         None,
         description="Directory for response cache (defaults to ~/.cache/llm-markdownify)",
     )
 
     # Logging
-    log_level: Optional[LogLevel] = Field(
+    log_level: LogLevel | None = Field(
         None,
         description="Deprecated: no effect. Use convert(log_level=...) or "
         "llm_markdownify.logging.enable_console_logging()",
@@ -137,7 +136,7 @@ class MarkdownifyConfig(BaseModel):
 
     @field_validator("input_path")
     @classmethod
-    def _validate_input(cls, path: Optional[Path]) -> Optional[Path]:
+    def _validate_input(cls, path: Path | None) -> Path | None:
         if path is None:
             return None
         if not path.exists():
@@ -148,7 +147,7 @@ class MarkdownifyConfig(BaseModel):
 
     @field_validator("output_path")
     @classmethod
-    def _validate_output(cls, path: Optional[Path]) -> Optional[Path]:
+    def _validate_output(cls, path: Path | None) -> Path | None:
         if path is None:
             return None
         parent = path.parent
@@ -160,7 +159,7 @@ class MarkdownifyConfig(BaseModel):
 
     @field_validator("pages")
     @classmethod
-    def _validate_pages(cls, spec: Optional[str]) -> Optional[str]:
+    def _validate_pages(cls, spec: str | None) -> str | None:
         if spec is not None:
             from .sources import validate_pages
 
@@ -169,7 +168,7 @@ class MarkdownifyConfig(BaseModel):
 
     @field_validator("log_level")
     @classmethod
-    def _warn_log_level(cls, value: Optional[str]) -> Optional[str]:
+    def _warn_log_level(cls, value: str | None) -> str | None:
         if value is not None:
             warnings.warn(
                 "MarkdownifyConfig.log_level no longer configures logging and will be removed. "
@@ -180,7 +179,7 @@ class MarkdownifyConfig(BaseModel):
         return value
 
     @model_validator(mode="after")
-    def _enforce_pdf_preference(self) -> "MarkdownifyConfig":
+    def _enforce_pdf_preference(self) -> MarkdownifyConfig:
         docx = self.input_path is not None and self.input_path.suffix.lower() == ".docx"
         if docx and not self.allow_docx:
             raise ValueError(
