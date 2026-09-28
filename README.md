@@ -127,8 +127,11 @@ No API at all? Serve a vision model locally with LM Studio, Ollama, vLLM or llam
 
 ## Built for production
 
-- **Safe to call from threads.** Use `convert()` from a web server or a worker pool. (Retry, cache and
-  rate-limit settings are currently process-wide, so give concurrent calls the same settings.)
+- **Safe to call from threads.** Use `convert()` from a web server or a worker pool. Each conversion
+  keeps its own retry, rate-limit, cache and provider settings, including its API key.
+- **Quiet as a library.** `convert()` prints nothing; your app's logging config decides what is
+  shown (`logging.basicConfig(level=logging.INFO)` for progress messages). Pass
+  `log_level="normal"` for the same output as the command-line tool.
 - **Rate limits are waited out, real errors fail fast.** Rate limits, timeouts and 5xx responses are
   retried with backoff. A bad key or a bad request fails on the first attempt with one clear line,
   and never prints your API key.

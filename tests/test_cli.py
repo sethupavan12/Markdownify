@@ -19,7 +19,7 @@ def test_cli_invokes_markdownifier(monkeypatch, tmp_path: Path):
     called = {}
 
     class FakeMarkdownifier:
-        def __init__(self, cfg, profile=None):
+        def __init__(self, cfg, profile=None, **kwargs):
             called["cfg"] = cfg
             called["profile"] = profile
 

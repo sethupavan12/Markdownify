@@ -6,46 +6,45 @@ from __future__ import annotations
 
 import logging
 
-from llm_markdownify.logging import get_logger, set_log_level
+from llm_markdownify.logging import PACKAGE_LOGGER, enable_console_logging, get_logger
 
 
-def test_get_logger_returns_logger():
-    """get_logger returns a configured logger."""
-    logger = get_logger("test_module")
-    assert isinstance(logger, logging.Logger)
-    assert logger.name == "test_module"
+def _console_handlers():
+    package = logging.getLogger(PACKAGE_LOGGER)
+    return [h for h in package.handlers if getattr(h, "_markdownify_console", False)]
 
 
-def test_get_logger_same_instance():
-    """get_logger returns the same logger for same name."""
-    logger1 = get_logger("test_same")
-    logger2 = get_logger("test_same")
-    assert logger1 is logger2
+def test_library_is_silent_by_default(capsys):
+    """Importing and using the library must not print anything the app did not ask for."""
+    get_logger("llm_markdownify.core").warning("should not appear")
+    out, err = capsys.readouterr()
+    assert out == "" and err == ""
 
 
-def test_set_log_level_quiet():
-    """set_log_level('quiet') sets WARNING level."""
-    set_log_level("quiet")
-    logger = get_logger("llm_markdownify.test_quiet")
-    assert logger.level == logging.WARNING
+def test_app_logging_config_receives_library_records(caplog):
+    with caplog.at_level(logging.INFO, logger=PACKAGE_LOGGER):
+        get_logger("llm_markdownify.core").info("converted 3 pages")
+    assert "converted 3 pages" in caplog.text
 
 
-def test_set_log_level_normal():
-    """set_log_level('normal') sets INFO level."""
-    set_log_level("normal")
-    logger = get_logger("llm_markdownify.test_normal")
-    assert logger.level == logging.INFO
+def test_console_logging_goes_to_stderr_never_stdout(capsys):
+    enable_console_logging("normal")
+    get_logger("llm_markdownify.core").info("hello")
+    out, err = capsys.readouterr()
+    assert out == ""
+    assert "hello" in err
 
 
-def test_set_log_level_verbose():
-    """set_log_level('verbose') sets DEBUG level."""
-    set_log_level("verbose")
-    logger = get_logger("llm_markdownify.test_verbose")
-    assert logger.level == logging.DEBUG
+def test_console_logging_is_idempotent_and_updates_level():
+    enable_console_logging("normal")
+    enable_console_logging("quiet")
+    assert len(_console_handlers()) == 1
+    assert logging.getLogger(PACKAGE_LOGGER).level == logging.WARNING
+    enable_console_logging("verbose")
+    assert logging.getLogger(PACKAGE_LOGGER).level == logging.DEBUG
 
 
-def test_set_log_level_debug():
-    """set_log_level('debug') sets DEBUG level."""
-    set_log_level("debug")
-    logger = get_logger("llm_markdownify.test_debug")
-    assert logger.level == logging.DEBUG
+def test_get_logger_adds_no_handlers():
+    logger = get_logger("llm_markdownify.some_module")
+    assert logger.handlers == []
+    assert logger.propagate is True

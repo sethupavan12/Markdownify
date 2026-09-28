@@ -186,7 +186,7 @@ def test_api_and_cli_share_config_defaults(monkeypatch, tmp_path: Path):
     captured = []
 
     class Fake:
-        def __init__(self, cfg, profile=None):
+        def __init__(self, cfg, profile=None, **kwargs):
             captured.append(cfg)
 
         def run(self):
@@ -418,3 +418,14 @@ def test_conversions_can_share_one_rate_limiter(tmp_path: Path):
     assert first.settings.rate_limiter is second.settings.rate_limiter is shared
     own_a, own_b = Markdownifier(cfg), Markdownifier(cfg)
     assert own_a.settings.rate_limiter is not own_b.settings.rate_limiter
+
+
+def test_convert_without_log_level_prints_nothing(monkeypatch, tmp_path: Path, capsys):
+    """The library stays silent unless asked; `log_level` opts in to CLI-style output."""
+    monkeypatch.setattr(litellm, "completion", lambda **kw: _response("# page"))
+    pdf = tmp_path / "in.pdf"
+    _make_pdf(pdf, 2)
+    convert(pdf, tmp_path / "out.md", enable_grouping=False)
+    out, err = capsys.readouterr()
+    assert out == "" and err == ""
+    assert (tmp_path / "out.md").read_text() == "# page\n\n# page\n"

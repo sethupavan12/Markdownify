@@ -39,7 +39,7 @@ input (.pdf | .png/.jpg/.jpeg | .docx opt-in)
 | `batch.py` / `batch_cli.py` | Batch mode (`markdownify-batch submit/status/collect/wait`) for OpenAI and Anthropic, via the official `openai` and `anthropic` SDKs (one small backend class each). Job state in `<out>/.markdownify-batch/`; one request per page, no grouping |
 | `cache.py` | Optional file cache of LLM responses (`~/.cache/llm-markdownify`), keyed on model + prompt + image hashes |
 | `prompts.py` / `prompt_profiles.py` | Prompt text. Built-in profiles: `generic` (default) and `contracts` (legal heading rules). Custom profiles are JSON files with `name`, `continuation_system`, `continuation_user`, `markdown_system`, `markdown_user` |
-| `logging.py` | `get_logger` / `set_log_level` (`quiet`/`normal`/`verbose`/`debug`) |
+| `logging.py` | `get_logger`, and `enable_console_logging(level)` for CLI-style stderr output (`quiet`/`normal`/`verbose`/`debug`) |
 
 ## Defaults to know
 
@@ -59,7 +59,9 @@ unless `--model` or `LLM_MARKDOWNIFY_MODEL` is set.
 - Retry, rate-limit, provider options and cache live on an `LLMSettings` object that each
   `Markdownifier` builds and passes down (`llm.generate_markdown(..., settings=...)`). Never add
   module-level mutable state: two conversions in one process must not share settings or API keys.
-  The log level is still process-wide (pending the library-logging decision).
+- The library is silent: modules log via `logging.get_logger` to the `llm_markdownify` logger, which
+  only has a `NullHandler`. Console output is opt-in via `enable_console_logging()` (the CLIs call it).
+  Never print or add handlers from library code.
 
 ## Dev workflow
 
@@ -96,7 +98,7 @@ about 3 points on a ~100-page subset as noise. See `docs/ROADMAP.md` for current
 
 - Python >= 3.10, full type hints on public functions, ruff line length 100.
 - Keep modules small and focused. No framework-style abstraction layers.
-- Log via `logging.get_logger`. Do not print.
+- Log via `logging.get_logger`. Do not print; the library must stay silent unless the app opts in.
 - Prompts: output must be document content only (no meta commentary). Grouping merges pages only for split
   visual structures (tables, boxed panels, charts), never for plain text continuity.
 - Do not hand-edit generated files (e.g. `uv.lock`); regenerate them with the tool.

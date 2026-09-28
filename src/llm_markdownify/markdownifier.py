@@ -14,7 +14,7 @@ from .cache import ResponseCache
 from .config import MarkdownifyConfig
 from .grouping import group_pages
 from .llm import LLMSettings, RateLimiter, generate_markdown
-from .logging import get_logger, set_log_level
+from .logging import get_logger
 from .pager import PageImage, load_document_pages
 from .prompt_profiles import DEFAULT_PROFILE, PromptProfile, load_prompt_profile
 
@@ -29,14 +29,15 @@ class Markdownifier:
         config: MarkdownifyConfig,
         profile: str | None = None,
         rate_limiter: RateLimiter | None = None,
+        show_progress: bool = False,
     ) -> None:
         """`rate_limiter` lets several conversions share one request budget (e.g. one API key);
-        by default each conversion gets its own limiter from `config.rate_limit_rpm`."""
+        by default each conversion gets its own limiter from `config.rate_limit_rpm`.
+        `show_progress` draws a progress bar on stderr (the CLI turns it on; libraries stay quiet).
+        """
+        self.show_progress = show_progress
         self.config = config
         self.profile: PromptProfile = load_prompt_profile(profile or DEFAULT_PROFILE)
-
-        # Configure logging level
-        set_log_level(config.log_level)
 
         # This conversion's own settings; nothing here is shared with other conversions.
         if rate_limiter is None and config.rate_limit_rpm:
@@ -103,7 +104,7 @@ class Markdownifier:
                 as_completed(future_to_idx),
                 total=len(groups),
                 desc="LLM groups",
-                disable=self.config.log_level == "quiet",
+                disable=not self.show_progress,
             )
             for future in progress:
                 idx = future_to_idx[future]

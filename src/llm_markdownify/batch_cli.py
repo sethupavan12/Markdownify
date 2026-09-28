@@ -12,7 +12,7 @@ from typing import List, NoReturn, Optional
 import typer
 
 from . import batch as batch_api
-from .logging import set_log_level
+from .logging import enable_console_logging
 
 app = typer.Typer(
     help=(
@@ -73,7 +73,7 @@ def submit(
     quiet: bool = typer.Option(False, "-q", "--quiet"),
 ) -> None:
     """Render every page and submit it as a batch job."""
-    set_log_level("quiet" if quiet else "normal")
+    enable_console_logging("quiet" if quiet else "normal")
     try:
         batch_api.submit_batch(
             inputs,
@@ -100,6 +100,7 @@ def submit(
 @app.command()
 def status(out: str = typer.Argument(..., help="Output directory of a submitted job")) -> None:
     """Show progress of every batch in the job."""
+    enable_console_logging("normal")
     try:
         st = batch_api.batch_status(out)
     except Exception as e:
@@ -120,6 +121,7 @@ def collect(
     retry_failed: bool = typer.Option(False, "--retry-failed", help="Resubmit failed pages"),
 ) -> None:
     """Download finished pages and write every complete document. Safe to re-run."""
+    enable_console_logging("normal")
     try:
         result = batch_api.collect_batch(out, retry_failed=retry_failed)
     except Exception as e:
@@ -135,6 +137,7 @@ def wait_cmd(
     retry_failed: bool = typer.Option(True, "--retry-failed/--no-retry-failed"),
 ) -> None:
     """Block until the job finishes, then collect."""
+    enable_console_logging("normal")
     try:
         result = batch_api.wait_batch(
             Path(out), poll_seconds=poll_seconds, retry_failed=retry_failed

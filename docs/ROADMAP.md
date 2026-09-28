@@ -42,6 +42,12 @@ no page furniture, LaTeX math, HTML tables for merged cells). Every fix has a re
 
 ## Phase 2 - A v1 API that agents and pipelines can use directly
 
+Decisions (2026-09-28): the response cache is on by default so reruns only resend failed pages; the
+library is silent unless the app configures logging (the CLI still prints); phase 2 ships as 1.0.0;
+the MCP server is an optional extra, `llm-markdownify[mcp]`.
+
+Progress: per-conversion settings and silent library logging are done (PR 1).
+
 The library should work well called from a script, a service, or an agent's shell.
 
 - **Result object, not just a file.** `markdownify(source) -> Result` with `.markdown`, per-page

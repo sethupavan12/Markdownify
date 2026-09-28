@@ -12,6 +12,7 @@ from pydantic import ValidationError
 
 from . import __version__
 from .config import MarkdownifyConfig
+from .logging import enable_console_logging
 from .markdownifier import Markdownifier
 
 app = typer.Typer(
@@ -146,8 +147,9 @@ def run(
             typer.secho(f"Error: {field}: {err['msg']}", err=True, fg=typer.colors.RED)
         raise typer.Exit(code=2)
 
+    enable_console_logging(log_level)
     try:
-        Markdownifier(cfg, profile=profile).run()
+        Markdownifier(cfg, profile=profile, show_progress=not quiet).run()
     except Exception as e:  # show one clean line; full tracebacks only with --verbose
         if verbose:
             raise
