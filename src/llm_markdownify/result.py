@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import threading
 from dataclasses import asdict, dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 
 @dataclass
@@ -20,7 +20,7 @@ class Usage:
     requests: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
-    cost_usd: Optional[float] = 0.0
+    cost_usd: float | None = 0.0
     cached_responses: int = 0
 
 
@@ -31,9 +31,7 @@ class UsageCounter:
         self._lock = threading.Lock()
         self._usage = Usage()
 
-    def add_response(
-        self, input_tokens: int, output_tokens: int, cost_usd: Optional[float]
-    ) -> None:
+    def add_response(self, input_tokens: int, output_tokens: int, cost_usd: float | None) -> None:
         with self._lock:
             u = self._usage
             u.requests += 1
@@ -61,8 +59,8 @@ class PageResult:
 
     number: int  # 1-based page number in the source document
     markdown: str = ""
-    error: Optional[str] = None
-    merged_into: Optional[int] = None
+    error: str | None = None
+    merged_into: int | None = None
 
     @property
     def ok(self) -> bool:

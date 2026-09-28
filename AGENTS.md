@@ -74,14 +74,17 @@ unless `--model` or `LLM_MARKDOWNIFY_MODEL` is set.
 ```bash
 uv sync --all-extras --dev              # install
 uv run pytest -q                        # tests (all mocked, no network)
-uv run ruff check src tests             # lint (CI runs this)
-uv run ruff format src tests            # format
+uv run ruff check src tests evals scripts           # lint (explicit rule set in pyproject.toml)
+uv run ruff format src tests evals scripts          # format (CI runs --check)
 uv run python scripts/add_header.py     # add SPDX headers to .py/.toml/.yml
 uv run markdownify examples/data/ocr/DocVQA__fxxj0037_3.png -o /tmp/out.md --model <model>   # real E2E run
 ```
 
-- CI: `.github/workflows/ci.yml` (lint + tests). Release: `.github/workflows/release.yml` publishes to PyPI
-  when a GitHub Release is created. Bump the version in both `pyproject.toml` and `src/llm_markdownify/__init__.py`.
+- CI: `.github/workflows/ci.yml` (lint, format check, tests on Python 3.11-3.14, `uv sync --locked`).
+  Actions are pinned to commit SHAs; Dependabot (`.github/dependabot.yml`) proposes updates.
+- Release: publishing a GitHub Release runs `.github/workflows/release.yml`, which uploads to PyPI via
+  trusted publishing (environment `pypi`, no token). Bump the version in both `pyproject.toml` and
+  `src/llm_markdownify/__init__.py` first.
 - Every `.py/.toml/.yml` file carries the Apache SPDX header (pre-commit adds it).
 - Tests must not call real LLMs. Mock `llm_markdownify.llm` / LiteLLM. Real-model checks are manual E2E runs.
 - Real E2E runs need a provider key in the environment (e.g. `OPENAI_API_KEY`). Never commit keys.
@@ -102,7 +105,7 @@ about 3 points on a ~100-page subset as noise. See `docs/ROADMAP.md` for current
 
 ## Conventions
 
-- Python >= 3.10, full type hints on public functions, ruff line length 100.
+- Python >= 3.11 (`X | None`, not `Optional`), full type hints on public functions, ruff line length 100.
 - Keep modules small and focused. No framework-style abstraction layers.
 - Log via `logging.get_logger`. Do not print; the library must stay silent unless the app opts in.
 - Prompts: output must be document content only (no meta commentary). Grouping merges pages only for split

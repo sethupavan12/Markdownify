@@ -69,6 +69,16 @@ The library should work well called from a script, a service, or an agent's shel
   with zero setup beyond a key; an `llms.txt` and an agent skill file documenting the CLI.
 - **Backend decision (needs maintainer sign-off):** see "Open decisions".
 
+### Tried and rejected: a prompt rule against emoji (2026-09-28)
+
+On the full benchmark the model drew an icon as an emoji (🔑, 🏅) on 2 of 1,403 pages. A prompt
+line asking it to keep printed symbols (checkboxes, check marks, arrows) but never use emoji for
+icons removed them, but on the same 105-page subset it lowered the score from 84.9 to 81.1 (old-scan
+math 83.9 -> 66.3, tables 89.2 -> 78.4), while `main` without the line scored 84.9 the same day and
+produced no emoji on those two pages in 3 runs each. The problem is rare and random; the cure was
+expensive. Stripping emoji afterwards was also rejected: it would delete real emoji from
+screenshots and chat logs.
+
 ## Phase 3 - Speed and cost at production scale
 
 - **Hybrid text layer.** Most born-digital PDFs have a correct text layer. Pass it to the model as an

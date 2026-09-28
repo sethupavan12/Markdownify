@@ -7,10 +7,11 @@ from __future__ import annotations
 import base64
 import tempfile
 import threading
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from io import BytesIO
 from pathlib import Path
-from typing import TYPE_CHECKING, Iterable, Iterator, List, Literal, Optional
+from typing import TYPE_CHECKING, Literal
 
 import pypdfium2 as pdfium
 from PIL import Image, ImageOps
@@ -19,7 +20,7 @@ from .logging import get_logger
 
 try:
     from docx2pdf import convert as docx2pdf_convert  # type: ignore
-except Exception:  # pragma: no cover - optional
+except Exception:  # noqa: BLE001 # pragma: no cover - optional; any import failure means no DOCX
     docx2pdf_convert = None  # type: ignore
 
 if TYPE_CHECKING:
@@ -124,7 +125,7 @@ def iter_pdf_pages(
     dpi: int,
     max_side: int = 2048,
     fmt: ImageFormat = "jpeg",
-    indices: Optional[Iterable[int]] = None,
+    indices: Iterable[int] | None = None,
 ) -> Iterator[PageImage]:
     """Yield PDF pages one at a time, rendered at `dpi` and capped at `max_side` pixels.
 
@@ -162,7 +163,7 @@ def iter_pdf_pages(
 
 def iter_pdf_pages_as_images(
     pdf_path: Path, dpi: int, max_side: int = 2048, fmt: ImageFormat = "jpeg"
-) -> List[PageImage]:
+) -> list[PageImage]:
     """All pages of a PDF as a list (see `iter_pdf_pages`)."""
     return list(iter_pdf_pages(pdf_path, dpi, max_side, fmt))
 
@@ -176,7 +177,7 @@ def iter_image_pages(
     source: Path | bytes,
     max_side: int,
     fmt: ImageFormat,
-    indices: Optional[Iterable[int]] = None,
+    indices: Iterable[int] | None = None,
 ) -> Iterator[PageImage]:
     """Yield the pages of an image (path or bytes). A multi-page TIFF gives one page per frame."""
     with Image.open(BytesIO(source) if isinstance(source, bytes) else source) as img:
@@ -186,7 +187,7 @@ def iter_image_pages(
             yield _page_from_pil(i, frame, max_side, fmt)
 
 
-def _load_image_pages(path: Path, max_side: int, fmt: ImageFormat) -> List[PageImage]:
+def _load_image_pages(path: Path, max_side: int, fmt: ImageFormat) -> list[PageImage]:
     return list(iter_image_pages(path, max_side, fmt))
 
 
@@ -205,13 +206,13 @@ def count_pages(kind: str, source: Path | bytes) -> int:
 
 
 def render_document(
-    doc: "Document",
+    doc: Document,
     dpi: int,
     max_side: int = 2048,
     image_format: ImageFormat = "jpeg",
     allow_docx: bool = False,
-    pages: Optional[str] = None,
-) -> tuple[int, List[PageImage]]:
+    pages: str | None = None,
+) -> tuple[int, list[PageImage]]:
     """Render a Document (from `sources.load_source`). Returns (total pages, rendered pages).
 
     `pages` is a 1-based selection like "1-5,12,40-"; only those pages are rendered.
@@ -259,7 +260,7 @@ def load_document_pages(
     allow_docx: bool = False,
     max_side: int = 2048,
     image_format: ImageFormat = "jpeg",
-) -> List[PageImage]:
+) -> list[PageImage]:
     """Load a PDF, image, or DOCX (if allowed) as a list of page images.
 
     - PDF: rendered with pypdfium2 at `dpi`, longest side capped at `max_side`

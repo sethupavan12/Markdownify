@@ -19,7 +19,7 @@ import argparse
 import functools
 import os
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from .api import markdownify
 from .pager import count_pages
@@ -62,7 +62,7 @@ def _explain_errors(fn):
             return fn(*args, **kwargs)
         except ToolError:
             raise
-        except Exception as e:  # noqa: BLE001 - every failure becomes a readable tool error
+        except Exception as e:
             raise ToolError(f"{type(e).__name__}: {e}") from e
 
     return wrapper
@@ -81,8 +81,8 @@ def _default_roots() -> list[Path]:
 
 
 def build_server(
-    roots: Optional[list[Path]] = None,
-    model: Optional[str] = None,
+    roots: list[Path] | None = None,
+    model: str | None = None,
     chunk_pages: int = 20,
     allow_private_urls: bool = False,
     allow_model_override: bool = False,
@@ -118,9 +118,7 @@ def build_server(
 
     @server.tool()
     @_explain_errors
-    def convert_document(
-        source: str, pages: Optional[str] = None, model: Optional[str] = None
-    ) -> str:
+    def convert_document(source: str, pages: str | None = None, model: str | None = None) -> str:
         """Convert a PDF or image to Markdown.
 
         source: a file path (relative to the allowed folder) or an http(s) URL.
@@ -176,7 +174,7 @@ def _ranges(numbers: list[int]) -> str:
     return ", ".join(parts)
 
 
-def main(argv: Optional[list[str]] = None) -> None:
+def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="markdownify-mcp", description=__doc__.split("\n\n")[0])
     parser.add_argument(
         "--root",
@@ -217,7 +215,7 @@ def main(argv: Optional[list[str]] = None) -> None:
     except ImportError as e:  # the mcp package is an optional extra
         raise SystemExit(
             f'markdownify-mcp needs the MCP extra: pip install "llm-markdownify[mcp]" ({e})'
-        )
+        ) from e
     server.run()  # stdio: stdout carries the protocol, so the library must not print
 
 

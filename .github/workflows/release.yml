@@ -4,31 +4,35 @@
 
 name: Release
 
+# Publishes to PyPI with trusted publishing (OIDC): no API token is stored in GitHub, and PyPI
+# records a signed attestation of which workflow built the files.
 on:
   release:
-    types: [created]
+    types: [published]
   workflow_dispatch:
+
+permissions: {}
 
 jobs:
   publish:
     runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/llm-markdownify
     permissions:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v3
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
       - name: Build (sdist + wheel)
-        run: |
-          uv build --sdist --wheel
+        run: uv build --sdist --wheel
       - name: Verify metadata
-        run: |
-          uvx twine check dist/*
+        run: uvx twine check dist/*
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
           packages-dir: dist
-          password: ${{ secrets.PYPI_API_TOKEN }}
-          skip-existing: true
-          verbose: true
           print-hash: true

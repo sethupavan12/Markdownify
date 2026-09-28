@@ -9,7 +9,7 @@ Thanks for your interest in contributing! This guide explains how to set up your
 
 ## Getting started
 ### Prerequisites
-- Python 3.10+
+- Python 3.11+
 - [uv](https://github.com/astral-sh/uv) (fast dependency manager)
 - Git
 
@@ -33,8 +33,8 @@ uv run pre-commit run --all-files
   ```bash
   uv run pre-commit run --all-files
   # or directly
-  uv run ruff check src tests
-  uv run ruff format src tests
+  uv run ruff check src tests evals scripts
+  uv run ruff format src tests evals scripts
   ```
 - Run tests:
   ```bash
