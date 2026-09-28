@@ -10,10 +10,10 @@ from typing import List, Tuple
 
 from tqdm import tqdm
 
-from .cache import configure_cache
+from .cache import ResponseCache
 from .config import MarkdownifyConfig
 from .grouping import group_pages
-from .llm import configure_llm, generate_markdown
+from .llm import LLMSettings, RateLimiter, generate_markdown
 from .logging import get_logger, set_log_level
 from .pager import PageImage, load_document_pages
 from .prompt_profiles import DEFAULT_PROFILE, PromptProfile, load_prompt_profile
@@ -24,25 +24,29 @@ logger = get_logger("llm_markdownify.core")
 class Markdownifier:
     """Orchestrates the conversion of a document into Markdown using a Vision LLM."""
 
-    def __init__(self, config: MarkdownifyConfig, profile: str | None = None) -> None:
+    def __init__(
+        self,
+        config: MarkdownifyConfig,
+        profile: str | None = None,
+        rate_limiter: RateLimiter | None = None,
+    ) -> None:
+        """`rate_limiter` lets several conversions share one request budget (e.g. one API key);
+        by default each conversion gets its own limiter from `config.rate_limit_rpm`."""
         self.config = config
         self.profile: PromptProfile = load_prompt_profile(profile or DEFAULT_PROFILE)
 
         # Configure logging level
         set_log_level(config.log_level)
 
-        # Configure LLM retry and rate limiting
-        configure_llm(
+        # This conversion's own settings; nothing here is shared with other conversions.
+        if rate_limiter is None and config.rate_limit_rpm:
+            rate_limiter = RateLimiter(config.rate_limit_rpm)
+        self.settings = LLMSettings(
             max_retries=config.max_retries,
             retry_delay=config.retry_delay,
-            rate_limit_rpm=config.rate_limit_rpm,
-            llm_kwargs=config.llm_kwargs,
-        )
-
-        # Configure caching
-        configure_cache(
-            cache_dir=config.cache_dir,
-            enabled=config.enable_cache,
+            rate_limiter=rate_limiter,
+            llm_kwargs=dict(config.llm_kwargs),
+            cache=ResponseCache(cache_dir=config.cache_dir, enabled=config.enable_cache),
         )
 
     def _render_pages(self) -> List[PageImage]:
@@ -61,6 +65,7 @@ class Markdownifier:
             max_group_pages=self.config.max_group_pages,
             enable_grouping=self.config.enable_grouping,
             profile=self.profile,
+            settings=self.settings,
             grouping_concurrency=(
                 self.config.grouping_concurrency
                 if self.config.grouping_concurrency
@@ -76,6 +81,7 @@ class Markdownifier:
             profile=self.profile,
             temperature=self.config.temperature,
             max_tokens=self.config.max_tokens,
+            settings=self.settings,
         )
 
     def run(self) -> Path:

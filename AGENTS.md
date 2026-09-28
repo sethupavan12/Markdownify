@@ -56,7 +56,10 @@ unless `--model` or `LLM_MARKDOWNIFY_MODEL` is set.
 - Reasoning models spend output tokens on thinking. Never put small `max_tokens` caps on calls, and do
   not send `temperature` unless the user set it.
 - Never let the CLI print local variables on errors (they contain API keys). `pretty_exceptions_show_locals=False`.
-- Retry/rate-limit/cache/log settings are module globals set per `Markdownifier`; tests reset them.
+- Retry, rate-limit, provider options and cache live on an `LLMSettings` object that each
+  `Markdownifier` builds and passes down (`llm.generate_markdown(..., settings=...)`). Never add
+  module-level mutable state: two conversions in one process must not share settings or API keys.
+  The log level is still process-wide (pending the library-logging decision).
 
 ## Dev workflow
 

@@ -20,7 +20,7 @@ class FakePage:
 def test_grouping_simple(monkeypatch):
     calls = []
 
-    def fake_assess(model, first_data_url, second_data_url, profile=None):
+    def fake_assess(model, first_data_url, second_data_url, profile=None, settings=None):
         calls.append((first_data_url, second_data_url))
         # pages 0->1 continue, 1->2 stop
         if second_data_url is None:

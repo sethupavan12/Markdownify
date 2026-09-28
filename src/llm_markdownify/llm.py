@@ -11,6 +11,7 @@ import os
 import re
 import threading
 import time
+from dataclasses import dataclass, field
 from typing import Any, List, Optional
 
 from tenacity import (
@@ -21,7 +22,7 @@ from tenacity import (
     wait_random_exponential,
 )
 
-from .cache import get_cache
+from .cache import ResponseCache
 from .logging import get_logger
 from .prompt_profiles import PromptProfile
 
@@ -84,36 +85,26 @@ class RateLimiter:
             time.sleep(wait_time)
 
 
-# Global rate limiter and retry config (configured at runtime)
-_rate_limiter: Optional[RateLimiter] = None
-_max_retries: int = 5
-_retry_delay: float = 1.0
-_llm_kwargs: dict[str, Any] = {}
-
 # Rate limits clear with time, so they get a time budget instead of an attempt count. This keeps a
 # page alive while another job saturates the same key's tokens-per-minute quota.
 RATE_LIMIT_BUDGET_S = 180.0
 
 
-def configure_llm(
-    max_retries: int = 5,
-    retry_delay: float = 1.0,
-    rate_limit_rpm: Optional[int] = None,
-    llm_kwargs: Optional[dict[str, Any]] = None,
-) -> None:
-    """Configure retry, rate limiting and extra provider kwargs (api_base, reasoning_effort...)."""
-    global _rate_limiter, _max_retries, _retry_delay, _llm_kwargs
-    _max_retries = max_retries
-    _retry_delay = retry_delay
-    _rate_limiter = RateLimiter(rate_limit_rpm) if rate_limit_rpm else None
-    _llm_kwargs = dict(llm_kwargs or {})
-    logger.debug(
-        "LLM configured: max_retries=%d, retry_delay=%.1fs, rpm=%s, extra=%s",
-        max_retries,
-        retry_delay,
-        rate_limit_rpm,
-        sorted(_llm_kwargs),
-    )
+@dataclass
+class LLMSettings:
+    """Everything one conversion needs to call the model: retries, rate limit, extra provider
+    options and the response cache.
+
+    Each conversion carries its own instance, so conversions running at the same time in one
+    process never see each other's settings or API keys. To make several conversions share one
+    request budget, give them the same `rate_limiter`.
+    """
+
+    max_retries: int = 5
+    retry_delay: float = 1.0
+    rate_limiter: Optional[RateLimiter] = None
+    llm_kwargs: dict[str, Any] = field(default_factory=dict)
+    cache: ResponseCache = field(default_factory=lambda: ResponseCache(enabled=False))
 
 
 def _hash_content(content: str) -> str:
@@ -137,20 +128,28 @@ def _is_retryable(exc: BaseException) -> bool:
     return isinstance(exc, transient)
 
 
-def _stop_retrying(state: RetryCallState) -> bool:
-    import litellm  # type: ignore
+def _stop_after(max_retries: int):
+    def _stop_retrying(state: RetryCallState) -> bool:
+        import litellm  # type: ignore
 
-    exc = state.outcome.exception() if state.outcome else None
-    if isinstance(exc, litellm.RateLimitError):
-        return state.seconds_since_start >= RATE_LIMIT_BUDGET_S
-    # Count other failures separately so waiting out rate limits doesn't use up their retries.
-    other_failures = getattr(state, "other_failures", 0) + 1
-    state.other_failures = other_failures  # type: ignore[attr-defined]
-    return other_failures > _max_retries  # first attempt isn't a retry
+        exc = state.outcome.exception() if state.outcome else None
+        if isinstance(exc, litellm.RateLimitError):
+            return state.seconds_since_start >= RATE_LIMIT_BUDGET_S
+        # Count other failures separately so waiting out rate limits doesn't use up their retries.
+        other_failures = getattr(state, "other_failures", 0) + 1
+        state.other_failures = other_failures  # type: ignore[attr-defined]
+        return other_failures > max_retries  # first attempt isn't a retry
+
+    return _stop_retrying
 
 
 def _completion_with_retry(
-    *, model: str, messages: list, temperature: float | None, max_tokens: int | None
+    *,
+    model: str,
+    messages: list,
+    temperature: float | None,
+    max_tokens: int | None,
+    settings: LLMSettings,
 ) -> tuple[str, str | None]:
     """Run one completion with retries. Returns (content, finish_reason)."""
     # Local import to allow env configuration above to take effect
@@ -163,20 +162,21 @@ def _completion_with_retry(
 
     @retry(
         retry=retry_if_exception(_is_retryable),
-        stop=_stop_retrying,
-        wait=wait_random_exponential(multiplier=_retry_delay, max=30),
+        stop=_stop_after(settings.max_retries),
+        wait=wait_random_exponential(multiplier=settings.retry_delay, max=30),
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
     def _do_completion() -> tuple[str, str | None]:
-        if _rate_limiter:
-            _rate_limiter.acquire()  # every attempt counts against the limit, retries included
+        if settings.rate_limiter:
+            # every attempt counts against the limit, retries included
+            settings.rate_limiter.acquire()
         kwargs: dict[str, Any] = {"model": model, "messages": messages, "drop_params": True}
         if temperature is not None:
             kwargs["temperature"] = temperature
         if max_tokens is not None:
             kwargs["max_tokens"] = max_tokens
-        kwargs.update(_llm_kwargs)
+        kwargs.update(settings.llm_kwargs)
         if (
             kwargs.get("api_base")
             and "api_key" not in kwargs
@@ -252,14 +252,14 @@ def parse_continuation_label(text: str) -> str:
 _TRANSPORT_ONLY_KWARGS = {"api_key", "timeout", "num_retries", "extra_headers"}
 
 
-def _request_key(model: str, messages: list, **params: Any) -> str:
+def _request_key(model: str, messages: list, llm_kwargs: dict[str, Any], **params: Any) -> str:
     """Stable hash of everything that affects the model's answer."""
     payload = json.dumps(
         {
             "model": model,
             "messages": messages,
             "params": params,
-            "extra": {k: v for k, v in _llm_kwargs.items() if k not in _TRANSPORT_ONLY_KWARGS},
+            "extra": {k: v for k, v in llm_kwargs.items() if k not in _TRANSPORT_ONLY_KWARGS},
         },
         sort_keys=True,
         default=str,
@@ -272,16 +272,18 @@ def assess_continuation(
     first_data_url: str,
     second_data_url: str | None,
     profile: PromptProfile,
+    settings: Optional[LLMSettings] = None,
 ) -> str:
     """Assess if pages should be merged (continuation detection)."""
+    settings = settings or LLMSettings()
     images = [first_data_url] + ([second_data_url] if second_data_url else [])
     messages = [
         {"role": "system", "content": profile.continuation_system},
         _message_with_images(profile.continuation_user, images),
     ]
 
-    cache = get_cache()
-    key = _request_key(model, messages, task="continuation")
+    cache = settings.cache
+    key = _request_key(model, messages, settings.llm_kwargs, task="continuation")
     cached = cache.get(model, key, [])
     if cached is not None:
         return cached
@@ -289,7 +291,7 @@ def assess_continuation(
     # No max_tokens cap: reasoning models spend tokens thinking before answering, and a tiny
     # cap leaves them with an empty answer.
     content, _ = _completion_with_retry(
-        model=model, messages=messages, temperature=None, max_tokens=None
+        model=model, messages=messages, temperature=None, max_tokens=None, settings=settings
     )
     result = parse_continuation_label(content)
     cache.set(model, key, [], result)
@@ -302,22 +304,30 @@ def generate_markdown(
     profile: PromptProfile,
     temperature: float | None = None,
     max_tokens: int | None = None,
+    settings: Optional[LLMSettings] = None,
 ) -> str:
     """Generate markdown from page images."""
+    settings = settings or LLMSettings()
     messages = [
         {"role": "system", "content": profile.markdown_system},
         _message_with_images(profile.markdown_user, image_data_urls),
     ]
 
-    cache = get_cache()
-    key = _request_key(model, messages, temperature=temperature, max_tokens=max_tokens)
+    cache = settings.cache
+    key = _request_key(
+        model, messages, settings.llm_kwargs, temperature=temperature, max_tokens=max_tokens
+    )
     cached = cache.get(model, key, [])
     if cached is not None:
         logger.info("Using cached markdown response")
         return cached
 
     content, finish_reason = _completion_with_retry(
-        model=model, messages=messages, temperature=temperature, max_tokens=max_tokens
+        model=model,
+        messages=messages,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        settings=settings,
     )
     if finish_reason == "length":
         logger.warning(
