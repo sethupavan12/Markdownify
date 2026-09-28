@@ -23,17 +23,13 @@ from typing import Any, Optional
 
 from .api import markdownify
 from .pager import count_pages
-from .sources import load_source
+from .sources import Document, is_url, load_source
 
 INSTRUCTIONS = (
     "Converts PDFs and images (scans, photos, screenshots) to clean Markdown with a vision model. "
     "Call document_info first to learn the page count, then convert_document for a page range. "
     "Long documents are returned in chunks; the reply says which pages are left."
 )
-
-
-def _is_url(source: str) -> bool:
-    return source.startswith(("http://", "https://"))
 
 
 class _Sandbox:
@@ -43,7 +39,7 @@ class _Sandbox:
         self.roots = [r.expanduser().resolve() for r in roots]
 
     def resolve(self, source: str) -> str | Path:
-        if _is_url(source):
+        if is_url(source):
             return source
         path = Path(source).expanduser()
         if not path.is_absolute():
@@ -72,16 +68,40 @@ def _explain_errors(fn):
     return wrapper
 
 
+def _default_roots() -> list[Path]:
+    """The working folder, unless it is the filesystem root or the home folder (Claude Desktop, for
+    one, starts servers in /): then an explicit --root is required."""
+    cwd = Path.cwd().resolve()
+    if cwd in (Path(cwd.anchor), Path.home().resolve()):
+        raise SystemExit(
+            f"markdownify-mcp is running in {cwd}; pass --root <folder> to choose which folder "
+            "the agent may read documents from."
+        )
+    return [cwd]
+
+
 def build_server(
     roots: Optional[list[Path]] = None,
     model: Optional[str] = None,
     chunk_pages: int = 20,
     allow_private_urls: bool = False,
+    allow_model_override: bool = False,
 ):
     from mcp.server.mcpserver import MCPServer
 
-    sandbox = _Sandbox(roots or [Path.cwd()])
+    if chunk_pages < 1:
+        raise ValueError("chunk_pages must be at least 1")
+    sandbox = _Sandbox(roots or _default_roots())
     server = MCPServer("llm-markdownify", instructions=INSTRUCTIONS)
+    default_model = model
+
+    def _load(source: str) -> Document:
+        """Check the source, then read it into memory once, so the file that was checked is the
+        file that gets converted (no swap between the check and the read)."""
+        doc = load_source(sandbox.resolve(source), allow_private_urls=allow_private_urls)
+        if doc.data is None and doc.path is not None:
+            doc.data = doc.path.read_bytes()
+        return doc
 
     @server.tool()
     @_explain_errors
@@ -90,35 +110,36 @@ def build_server(
 
         source: a file path (relative to the allowed folder) or an http(s) URL.
         """
-        doc = load_source(sandbox.resolve(source), allow_private_urls=allow_private_urls)
+        doc = _load(source)
         pages = None
         if doc.kind in ("pdf", "image"):
-            pages = count_pages(doc.kind, doc.data if doc.data is not None else doc.path)
+            pages = count_pages(doc.kind, doc.data)
         return {"source": doc.name, "type": doc.kind, "pages": pages}
 
     @server.tool()
     @_explain_errors
     def convert_document(
-        source: str, pages: Optional[str] = None, model_name: Optional[str] = None
+        source: str, pages: Optional[str] = None, model: Optional[str] = None
     ) -> str:
         """Convert a PDF or image to Markdown.
 
         source: a file path (relative to the allowed folder) or an http(s) URL.
         pages: 1-based selection like "1-5,12". Default: the first chunk of pages. The reply ends
             with a note saying which pages are left.
-        model_name: override the server's default vision model.
+        model: a different vision model, only if the server was started with
+            --allow-model-override.
         """
-        resolved = sandbox.resolve(source)
-        doc = load_source(resolved, allow_private_urls=allow_private_urls)
-        total = (
-            count_pages(doc.kind, doc.data if doc.data is not None else doc.path)
-            if doc.kind in ("pdf", "image")
-            else None
-        )
+        if model and not allow_model_override:
+            raise PermissionError(
+                "This server does not let the agent choose the model (start it with "
+                "--allow-model-override to allow that)"
+            )
+        doc = _load(source)
+        total = count_pages(doc.kind, doc.data) if doc.kind in ("pdf", "image") else None
         selection = pages or (f"1-{min(total, chunk_pages)}" if total else None)
         result = markdownify(
-            doc.data if doc.data is not None else doc.path,
-            model=model_name or model,
+            doc.data,
+            model=model or default_model,
             pages=selection,
             allow_private_urls=allow_private_urls,
         )
@@ -172,13 +193,27 @@ def main(argv: Optional[list[str]] = None) -> None:
         "--chunk-pages", type=int, default=20, help="Max pages per convert_document call (20)"
     )
     parser.add_argument(
+        "--allow-model-override",
+        action="store_true",
+        help="Let the agent pick a different model per call (off: the agent cannot run other, "
+        "possibly more expensive models on your keys)",
+    )
+    parser.add_argument(
         "--allow-private-urls",
         action="store_true",
         help="Allow URLs on private or local addresses (refused by default)",
     )
     args = parser.parse_args(argv)
+    if args.chunk_pages < 1:
+        parser.error("--chunk-pages must be at least 1")
     try:
-        server = build_server(args.root, args.model, args.chunk_pages, args.allow_private_urls)
+        server = build_server(
+            args.root,
+            args.model,
+            args.chunk_pages,
+            args.allow_private_urls,
+            args.allow_model_override,
+        )
     except ImportError as e:  # the mcp package is an optional extra
         raise SystemExit(
             f'markdownify-mcp needs the MCP extra: pip install "llm-markdownify[mcp]" ({e})'

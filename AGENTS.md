@@ -34,7 +34,7 @@ source (path | bytes | file object | URL; PDF, image, .docx opt-in)
 | `sources.py` | `load_source()` (path/bytes/file/URL -> `Document`), `parse_pages()` / `validate_pages()` for `--pages` |
 | `result.py` | `ConversionResult`, `PageResult`, `Usage`, and the thread-safe per-conversion `UsageCounter` |
 | `cli.py` | Typer app with a single command (`markdownify` and `llm-markdownify`, so `uvx llm-markdownify` works). No `-o` prints Markdown to stdout; `--json` prints the result; exit codes 0 ok, 1 nothing usable, 2 bad args, 3 partial. Logs only on stderr |
-| `mcp_server.py` | `markdownify-mcp` (extra `[mcp]`, MCP SDK 2.x `MCPServer`): tools `document_info` and `convert_document` (chunked). Paths confined to `--root` folders; tool errors re-raised as `ToolError` so agents see the reason |
+| `mcp_server.py` | `markdownify-mcp` (extra `[mcp]`, MCP SDK 2.x `MCPServer`): tools `document_info` and `convert_document` (chunked). Paths confined to `--root` folders (refuses `/` or home as an implicit root), file read once after the check; model override off by default; tool errors re-raised as `ToolError` so agents see the reason |
 | `config.py` | `MarkdownifyConfig` pydantic model: validation and defaults, `LLM_MARKDOWNIFY_MODEL` env default |
 | `markdownifier.py` | `Markdownifier.convert(source)` -> `ConversionResult`. Failed page groups are recorded and marked in the Markdown; fatal errors (`llm.is_fatal`) or `strict` stop the run; all groups failing raises |
 | `pager.py` | Rendering. PDFs via pypdfium2 (under a global lock), images incl. multi-page TIFF. `PageImage` holds encoded bytes plus lazy data URLs (full image, and a 1024px JPEG for grouping) |

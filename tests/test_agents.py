@@ -203,3 +203,76 @@ def test_ranges_helper():
     from llm_markdownify.mcp_server import _ranges
 
     assert _ranges([1, 2, 3, 7, 9, 10]) == "1-3, 7, 9-10"
+
+
+def test_mcp_refuses_filesystem_root_or_home_as_default(monkeypatch):
+    """Claude Desktop starts servers in /; without --root that would expose the whole disk."""
+    from llm_markdownify.mcp_server import build_server
+
+    for folder in (Path("/"), Path.home()):
+        monkeypatch.chdir(folder)
+        with pytest.raises(SystemExit, match="pass --root"):
+            build_server()
+
+
+def test_mcp_agent_cannot_pick_the_model_unless_allowed(model, tmp_path: Path):
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    from llm_markdownify.mcp_server import build_server
+
+    _pdf(tmp_path / "a.pdf", 1)
+    locked = build_server([tmp_path], model="m")
+    with pytest.raises(ToolError, match="allow-model-override"):
+        _call(locked, "convert_document", source="a.pdf", model="some-expensive-model")
+    open_server = build_server([tmp_path], model="m", allow_model_override=True)
+    _, text = _call(open_server, "convert_document", source="a.pdf", model="m2")
+    assert text.startswith("# page 1")
+
+
+def test_mcp_rejects_zero_chunk_pages():
+    from llm_markdownify.mcp_server import main
+
+    with pytest.raises(SystemExit):
+        main(["--root", "/tmp", "--chunk-pages", "0"])
+
+
+def test_uppercase_url_scheme_is_a_url():
+    from llm_markdownify.sources import is_url
+
+    assert is_url("HTTP://example.com/a.pdf") and is_url("https://x.io/a")
+    assert not is_url("file:///etc/hosts") and not is_url("report.pdf")
+
+
+def test_stdout_closed_early_exits_quietly(monkeypatch):
+    """Piping into `head` closes the pipe early; that used to end in a traceback."""
+    import os
+
+    import typer
+
+    from llm_markdownify.cli import _write_stdout
+
+    read_fd, write_fd = os.pipe()
+    os.close(read_fd)  # the reader (e.g. head) has gone away
+    saved = os.dup(1)
+    try:
+        os.dup2(write_fd, 1)
+        stream = os.fdopen(os.dup(1), "w")
+        monkeypatch.setattr(sys, "stdout", stream)
+        with pytest.raises(typer.Exit) as exit_info:
+            _write_stdout("x" * 1_000_000)
+        assert exit_info.value.exit_code == 0
+    finally:
+        os.dup2(saved, 1)
+        os.close(saved)
+        os.close(write_fd)
+
+
+def test_stdout_is_utf8_whatever_the_locale(model, tmp_path: Path, monkeypatch):
+    import io as _io
+
+    raw = _io.BytesIO()
+    monkeypatch.setattr(sys, "stdout", _io.TextIOWrapper(raw, encoding="cp1252"))
+    from llm_markdownify.cli import _write_stdout
+
+    _write_stdout("naïve ✓ 数学\n")
+    assert raw.getvalue().decode("utf-8") == "naïve ✓ 数学\n"

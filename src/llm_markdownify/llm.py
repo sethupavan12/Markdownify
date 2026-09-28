@@ -117,6 +117,8 @@ def _hash_content(content: str) -> str:
 def _is_missing_credentials(exc: BaseException) -> bool:
     # LiteLLM reports a missing API key as an InternalServerError (a 5xx), which would otherwise
     # be retried for tens of seconds before failing the same way.
+    if not type(exc).__module__.startswith(("litellm", "openai")):
+        return False
     text = str(exc)
     return "Missing credentials" in text or "api_key client option must be set" in text
 

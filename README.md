@@ -146,8 +146,10 @@ Other clients take the same command in their JSON config:
 ```
 
 MCP servers do not inherit your shell's environment, so pass the provider key in `env` as above.
-The agent can only read files inside `--root` folders (default: the folder the server starts in),
-and URLs on private or local addresses are refused unless you add `--allow-private-urls`.
+The agent can only read files inside the `--root` folders; without `--root` the server uses the
+folder it starts in, and refuses to start if that is `/` or your home folder. URLs on private or
+local addresses are refused unless you add `--allow-private-urls`, and the agent cannot switch to
+a different (possibly more expensive) model unless you add `--allow-model-override`.
 
 **From the shell.** With no `-o`, the Markdown goes to stdout and logs to stderr, so it pipes:
 
