@@ -35,14 +35,15 @@ benchmark most PDF-to-Markdown tools publish. It checks 1,403 real pages with ab
 tests: is this sentence present, is the page footer gone, is paragraph A before paragraph B, is this
 table cell next to that one, does this equation render the same.
 
-**llm-markdownify 0.5 with `gpt-6-luna` scores 81.6 ± 1.0 on the full benchmark.**
+**llm-markdownify with `gpt-6-luna` scores 81.6 ± 1.0 on the full benchmark** (measured on 0.5; 1.0
+uses the same prompt and scored the same on the 105-page subset, 84.9).
 
 | System | olmOCR-Bench | Source |
 |---|---|---|
 | Chandra 2 | 85.9 | [Datalab](https://huggingface.co/datalab-to/chandra-ocr-2) (self-reported) |
 | Mistral OCR 4 | 85.2 | [Mistral](https://mistral.ai/news/ocr-4/) (self-reported) |
 | olmOCR 2 (7B model trained for this benchmark) | 82.4 | [Ai2](https://github.com/allenai/olmocr) |
-| **llm-markdownify 0.5 + gpt-6-luna** | **81.6** | measured with [`evals/olmocr_bench`](evals/olmocr_bench) |
+| **llm-markdownify + gpt-6-luna** | **81.6** | measured with [`evals/olmocr_bench`](evals/olmocr_bench) |
 | Marker 2 (balanced) | 76.0 | [Datalab](https://github.com/datalab-to/marker) (self-reported) |
 | Docling | 50.3 | [Marker's benchmark](https://github.com/datalab-to/marker) |
 
@@ -55,8 +56,8 @@ What the library adds on top of the model, measured on a fixed 105-page stratifi
 |---|---|---|
 | `gpt-6-luna` with a bare "convert this page to Markdown" prompt | 72.6 | 11.9 s |
 | llm-markdownify 0.4 + `gpt-6-luna` | 72.5 (18 pages failed) | 14.8 s |
-| llm-markdownify 0.5 + `gpt-5.4-mini` | 80.4 | 4.8 s |
-| llm-markdownify 0.5 + `gpt-6-luna` | 84.9 | 14.6 s |
+| llm-markdownify 0.5+ + `gpt-5.4-mini` | 80.4 | 4.8 s |
+| llm-markdownify 0.5+ + `gpt-6-luna` | 84.9 | 14.6 s |
 
 The biggest single difference is headers and footers. With the bare prompt, 24% of the checks that
 running headers, footers and page numbers are gone pass (88% with llm-markdownify). Left in, that
