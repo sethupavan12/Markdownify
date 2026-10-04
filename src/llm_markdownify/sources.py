@@ -16,11 +16,11 @@ import time
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import BinaryIO, Literal, Optional, Union
+from typing import BinaryIO, Literal
 from urllib.parse import urlparse
 
 Kind = Literal["pdf", "image", "docx"]
-Source = Union[str, Path, bytes, bytearray, BinaryIO]
+Source = str | Path | bytes | bytearray | BinaryIO
 
 # Bigger downloads are refused; documents that large should be fetched and checked by the caller.
 MAX_DOWNLOAD_BYTES = 200 * 1024 * 1024
@@ -37,8 +37,8 @@ class Document:
 
     kind: Kind
     name: str  # for messages and the result; a file name or URL
-    path: Optional[Path] = None
-    data: Optional[bytes] = None
+    path: Path | None = None
+    data: bytes | None = None
 
 
 def is_url(source: object) -> bool:
@@ -46,7 +46,7 @@ def is_url(source: object) -> bool:
     return isinstance(source, str) and urlparse(source.strip()).scheme.lower() in ("http", "https")
 
 
-def _kind_from_suffix(suffix: str) -> Optional[Kind]:
+def _kind_from_suffix(suffix: str) -> Kind | None:
     suffix = suffix.lower()
     if suffix == ".pdf":
         return "pdf"
@@ -57,7 +57,7 @@ def _kind_from_suffix(suffix: str) -> Optional[Kind]:
     return None
 
 
-def sniff_kind(data: bytes) -> Optional[Kind]:
+def sniff_kind(data: bytes) -> Kind | None:
     """Recognise a file type from its first bytes (every format we read has a fixed signature)."""
     head = data[:16]
     if head.startswith(b"%PDF"):
@@ -108,14 +108,14 @@ def _refuse_private_network(url: str) -> None:
             )
 
 
-def _download(url: str, allow_private_urls: bool) -> tuple[bytes, Optional[str]]:
+def _download(url: str, allow_private_urls: bool) -> tuple[bytes, str | None]:
     import httpx  # installed with the openai and anthropic SDKs
 
     allow_private_urls = allow_private_urls or os.environ.get(
         "LLM_MARKDOWNIFY_ALLOW_PRIVATE_URLS"
     ) in ("1", "true", "yes")
 
-    def check(request: "httpx.Request") -> None:
+    def check(request: httpx.Request) -> None:
         if not allow_private_urls:
             _refuse_private_network(str(request.url))
 
@@ -123,28 +123,28 @@ def _download(url: str, allow_private_urls: bool) -> tuple[bytes, Optional[str]]
     chunks: list[bytes] = []
     size = 0
     deadline = time.monotonic() + DOWNLOAD_DEADLINE_S
-    with httpx.Client(
-        follow_redirects=True, timeout=DOWNLOAD_TIMEOUT_S, event_hooks={"request": [check]}
-    ) as client:
-        with client.stream("GET", url) as response:
-            response.raise_for_status()
-            declared = int(response.headers.get("content-length") or 0)
-            if declared > MAX_DOWNLOAD_BYTES:
-                raise ValueError(f"{name} is {declared} bytes; the limit is {MAX_DOWNLOAD_BYTES}")
-            for chunk in response.iter_bytes():
-                size += len(chunk)
-                if size > MAX_DOWNLOAD_BYTES:
-                    raise ValueError(f"{name} is larger than the {MAX_DOWNLOAD_BYTES}-byte limit")
-                if time.monotonic() > deadline:
-                    raise TimeoutError(
-                        f"Downloading {name} took longer than {DOWNLOAD_DEADLINE_S}s"
-                    )
-                chunks.append(chunk)
-            content_type = response.headers.get("content-type")
+    with (
+        httpx.Client(
+            follow_redirects=True, timeout=DOWNLOAD_TIMEOUT_S, event_hooks={"request": [check]}
+        ) as client,
+        client.stream("GET", url) as response,
+    ):
+        response.raise_for_status()
+        declared = int(response.headers.get("content-length") or 0)
+        if declared > MAX_DOWNLOAD_BYTES:
+            raise ValueError(f"{name} is {declared} bytes; the limit is {MAX_DOWNLOAD_BYTES}")
+        for chunk in response.iter_bytes():
+            size += len(chunk)
+            if size > MAX_DOWNLOAD_BYTES:
+                raise ValueError(f"{name} is larger than the {MAX_DOWNLOAD_BYTES}-byte limit")
+            if time.monotonic() > deadline:
+                raise TimeoutError(f"Downloading {name} took longer than {DOWNLOAD_DEADLINE_S}s")
+            chunks.append(chunk)
+        content_type = response.headers.get("content-type")
     return b"".join(chunks), content_type
 
 
-def _kind_from_content_type(content_type: Optional[str], url: str) -> Optional[Kind]:
+def _kind_from_content_type(content_type: str | None, url: str) -> Kind | None:
     main = (content_type or "").split(";")[0].strip().lower()
     if main == "application/pdf":
         return "pdf"
@@ -205,19 +205,19 @@ class PageSelectionError(ValueError):
 _RANGE = re.compile(r"^\s*(\d*)\s*(?:(-)\s*(\d*))?\s*$")
 
 
-def _page_ranges(spec: str) -> list[tuple[int, Optional[int]]]:
+def _page_ranges(spec: str) -> list[tuple[int, int | None]]:
     """Split "1-5,12,40-" into 1-based (start, end) pairs; end None means "to the last page".
 
     Checks syntax only, so it is cheap even for open-ended ranges.
     """
-    ranges: list[tuple[int, Optional[int]]] = []
+    ranges: list[tuple[int, int | None]] = []
     for part in spec.split(","):
         match = _RANGE.match(part)
         if not part.strip() or not match or not (match.group(1) or match.group(3)):
             raise PageSelectionError(f"Invalid page selection {part!r} in {spec!r}")
         first, dash, last = match.groups()
         start = int(first) if first else 1
-        end: Optional[int] = (int(last) if last else None) if dash else start
+        end: int | None = (int(last) if last else None) if dash else start
         if start < 1 or (end is not None and end < 1):
             raise PageSelectionError(f"Page numbers start at 1: {part!r}")
         if end is not None and start > end:

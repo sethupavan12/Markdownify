@@ -21,9 +21,10 @@ import os
 import tempfile
 import time
 import uuid
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable, Iterator, Optional
+from typing import Any
 
 from .llm import _message_with_images, strip_markdown_fence
 from .logging import get_logger
@@ -47,8 +48,8 @@ _ANTHROPIC_EFFORTS = ("low", "medium", "high", "xhigh", "max")
 @dataclass
 class PageResult:
     custom_id: str
-    text: Optional[str]  # None when the page failed
-    error: Optional[str] = None
+    text: str | None  # None when the page failed
+    error: str | None = None
     truncated: bool = False
 
 
@@ -60,7 +61,7 @@ class BatchInfo:
     total: int
     completed: int
     failed: int
-    error: Optional[str] = None  # set when the whole batch was rejected
+    error: str | None = None  # set when the whole batch was rejected
 
 
 @dataclass
@@ -99,7 +100,7 @@ class CollectResult:
 class _OpenAIBackend:
     name = "openai"
 
-    def __init__(self, api_base: Optional[str] = None, client=None):
+    def __init__(self, api_base: str | None = None, client=None):
         if client is None:
             from openai import OpenAI
 
@@ -125,11 +126,11 @@ class _OpenAIBackend:
             {"custom_id": custom_id, "method": "POST", "url": "/v1/chat/completions", "body": body}
         )
 
-    def upload(self, shard: Path) -> Optional[str]:
+    def upload(self, shard: Path) -> str | None:
         with open(shard, "rb") as fh:
             return self.client.files.create(file=fh, purpose="batch").id
 
-    def create(self, shard: Path, input_ref: Optional[str], job_id: str) -> str:
+    def create(self, shard: Path, input_ref: str | None, job_id: str) -> str:
         # One attempt only: an SDK retry after a client-side timeout could start a second batch
         # that we never record but still pay for. A failed create is left for recovery.
         return (
@@ -143,7 +144,7 @@ class _OpenAIBackend:
             .id
         )
 
-    def find_orphan(self, entry: dict, job_id: str, known: set[str]) -> Optional[str]:
+    def find_orphan(self, entry: dict, job_id: str, known: set[str]) -> str | None:
         for b in self.client.batches.list(limit=100):
             meta = getattr(b, "metadata", None) or {}
             if meta.get("job_id") == job_id and b.input_file_id == entry["input_file_id"]:
@@ -167,7 +168,7 @@ class _OpenAIBackend:
             error=error,
         )
 
-    def _rows(self, file_id: Optional[str]) -> list[dict[str, Any]]:
+    def _rows(self, file_id: str | None) -> list[dict[str, Any]]:
         if not file_id:
             return []
         text = self.client.files.content(file_id).text
@@ -199,7 +200,7 @@ class _OpenAIBackend:
 class _AnthropicBackend:
     name = "anthropic"
 
-    def __init__(self, api_base: Optional[str] = None, client=None):
+    def __init__(self, api_base: str | None = None, client=None):
         if client is None:
             import anthropic
 
@@ -236,16 +237,16 @@ class _AnthropicBackend:
             params["output_config"] = {"effort": opts["reasoning_effort"]}
         return json.dumps({"custom_id": custom_id, "params": params})
 
-    def upload(self, shard: Path) -> Optional[str]:
+    def upload(self, shard: Path) -> str | None:
         return None  # requests go inline in the create call
 
-    def create(self, shard: Path, input_ref: Optional[str], job_id: str) -> str:
+    def create(self, shard: Path, input_ref: str | None, job_id: str) -> str:
         with open(shard, encoding="utf-8") as fh:
             requests = [json.loads(line) for line in fh if line.strip()]
         # One attempt only (see the OpenAI backend): a retried 190 MB POST could double-bill.
         return self.client.with_options(max_retries=0).messages.batches.create(requests=requests).id
 
-    def find_orphan(self, entry: dict, job_id: str, known: set[str]) -> Optional[str]:
+    def find_orphan(self, entry: dict, job_id: str, known: set[str]) -> str | None:
         """Anthropic batches carry no metadata, so match on creation time and request count.
         Adopt only an unambiguous match; otherwise the pages show as missing and
         `--retry-failed` resubmits them."""
@@ -397,7 +398,7 @@ def _iter_pages(path: Path, opts: dict[str, Any]) -> Iterator[PageImage]:
 
 
 def _request_lines(
-    backend, manifest: dict[str, Any], wanted: Optional[set[str]] = None
+    backend, manifest: dict[str, Any], wanted: set[str] | None = None
 ) -> Iterator[tuple[str, str]]:
     """Yield (custom_id, jsonl line) for every page, or only the custom_ids in `wanted`.
 
@@ -437,7 +438,8 @@ def _submit_lines(
     submitted = 0
     shard_ids: list[str] = []
     shard_bytes = 0
-    shard = tempfile.NamedTemporaryFile(
+    # Kept open across uploads and deleted by hand after each one, so not a `with` block.
+    shard = tempfile.NamedTemporaryFile(  # noqa: SIM115
         "w", suffix=".jsonl", dir=_state(out_dir), delete=False, encoding="utf-8"
     )
 
@@ -460,7 +462,7 @@ def _submit_lines(
             _save_manifest(out_dir, manifest)
             logger.info("Started batch %s with %d page requests", entry["id"], len(shard_ids))
         os.unlink(shard.name)
-        shard = tempfile.NamedTemporaryFile(
+        shard = tempfile.NamedTemporaryFile(  # noqa: SIM115
             "w", suffix=".jsonl", dir=_state(out_dir), delete=False, encoding="utf-8"
         )
         shard_ids, shard_bytes = [], 0
@@ -519,14 +521,14 @@ def submit_batch(
     out_dir: str | Path,
     *,
     model: str = "gpt-5.4-mini",
-    profile: Optional[str] = None,
+    profile: str | None = None,
     dpi: int = 200,
     max_image_px: int = 2048,
     image_format: ImageFormat = "jpeg",
     max_tokens: int = 16000,
-    temperature: Optional[float] = None,
-    reasoning_effort: Optional[str] = None,
-    api_base: Optional[str] = None,
+    temperature: float | None = None,
+    reasoning_effort: str | None = None,
+    api_base: str | None = None,
     client=None,
 ) -> Path:
     """Render every page of `inputs` and submit them as batch jobs. Returns out_dir.
@@ -567,7 +569,7 @@ def submit_batch(
         },
         "documents": [
             {"input": str(f.resolve()), "output": str(o.resolve()), "pages": None}
-            for f, o in zip(files, _output_paths(files, out))
+            for f, o in zip(files, _output_paths(files, out), strict=True)
         ],
         "batches": [],
         "page_errors": {},

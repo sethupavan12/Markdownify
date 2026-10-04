@@ -7,17 +7,15 @@ from __future__ import annotations
 import json
 import os
 import sys
-
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import typer
 from pydantic import ValidationError
 
 from . import __version__
 from .config import MarkdownifyConfig
-from .logging import enable_console_logging
-from .logging import get_logger
+from .logging import enable_console_logging, get_logger
 from .markdownifier import Markdownifier
 from .sources import PageSelectionError
 from .sources import is_url as source_is_url
@@ -52,7 +50,7 @@ def _write_stdout(text: str) -> None:
         # Point stdout at devnull so Python's shutdown flush does not raise again.
         devnull = os.open(os.devnull, os.O_WRONLY)
         os.dup2(devnull, sys.stdout.fileno())
-        raise typer.Exit(code=0)
+        raise typer.Exit(code=0) from None
 
 
 def _version_callback(value: bool) -> None:
@@ -67,7 +65,7 @@ def run(
         ...,
         help="Path to input .pdf (preferred), image, or .docx (with --allow-docx)",
     ),
-    output: Optional[str] = typer.Option(
+    output: str | None = typer.Option(
         None,
         "-o",
         "--output",
@@ -78,19 +76,19 @@ def run(
         "--json",
         help="Print the full result as JSON: markdown, per-page results, usage, warnings",
     ),
-    model: Optional[str] = typer.Option(
+    model: str | None = typer.Option(
         None, help="LiteLLM model, e.g. gpt-5.4-mini, azure/<deployment>, gemini/gemini-2.5-flash"
     ),
-    dpi: Optional[int] = typer.Option(
+    dpi: int | None = typer.Option(
         None, help="DPI for rendering PDF pages [default: 200]. Ignored for image inputs."
     ),
-    max_image_px: Optional[int] = typer.Option(
+    max_image_px: int | None = typer.Option(
         None, help="Longest side in pixels of each page image sent to the model [default: 2048]"
     ),
-    image_format: Optional[str] = typer.Option(
+    image_format: str | None = typer.Option(
         None, help="Page image encoding: jpeg or png [default: jpeg]"
     ),
-    pages: Optional[str] = typer.Option(
+    pages: str | None = typer.Option(
         None, "--pages", help='Pages to convert, e.g. "1-5,12,40-" [default: all]'
     ),
     allow_private_urls: bool = typer.Option(
@@ -103,46 +101,46 @@ def run(
         "--strict",
         help="Fail if any page fails, instead of writing the rest with the failed pages marked",
     ),
-    max_group_pages: Optional[int] = typer.Option(
+    max_group_pages: int | None = typer.Option(
         None, help="Max pages to merge for continued content [default: 3]"
     ),
-    grouping: Optional[bool] = typer.Option(
+    grouping: bool | None = typer.Option(
         None,
         "--grouping/--no-grouping",
         help="Enable LLM-based grouping of continued content [default: on]",
     ),
-    temperature: Optional[float] = typer.Option(
+    temperature: float | None = typer.Option(
         None, help="LLM temperature [default: provider default]"
     ),
-    max_tokens: Optional[int] = typer.Option(None, help="LLM max output tokens [default: 16000]"),
-    reasoning_effort: Optional[str] = typer.Option(
+    max_tokens: int | None = typer.Option(None, help="LLM max output tokens [default: 16000]"),
+    reasoning_effort: str | None = typer.Option(
         None, help="Reasoning effort for reasoning models (e.g. none, low, medium, high)"
     ),
-    api_base: Optional[str] = typer.Option(
+    api_base: str | None = typer.Option(
         None, help="Custom API base URL (e.g. a local vLLM/Ollama OpenAI-compatible server)"
     ),
-    concurrency: Optional[int] = typer.Option(
+    concurrency: int | None = typer.Option(
         None,
         help="Max concurrent LLM requests for page groups [default: 4]. Higher is faster but "
         "may hit provider rate limits.",
     ),
-    grouping_concurrency: Optional[int] = typer.Option(
+    grouping_concurrency: int | None = typer.Option(
         None,
         help="Max concurrent continuation checks (defaults to --concurrency)",
     ),
-    profile: Optional[str] = typer.Option(
+    profile: str | None = typer.Option(
         None, help="Prompt profile name ('generic', 'contracts') or path to a JSON profile"
     ),
     allow_docx: bool = typer.Option(
         False, help="Allow DOCX via Word/COM conversion (not recommended). Prefer PDFs."
     ),
-    max_retries: Optional[int] = typer.Option(
+    max_retries: int | None = typer.Option(
         None, help="Max retries for transient LLM errors [default: 5]"
     ),
-    retry_delay: Optional[float] = typer.Option(
+    retry_delay: float | None = typer.Option(
         None, help="Base delay in seconds for exponential backoff [default: 1.0]"
     ),
-    rate_limit: Optional[int] = typer.Option(
+    rate_limit: int | None = typer.Option(
         None, "--rate-limit", help="Max requests per minute (default: no limit)"
     ),
     cache: bool = typer.Option(
@@ -150,14 +148,14 @@ def run(
         "--cache/--no-cache",
         help="Cache answers on disk so a rerun only pays for pages that failed or changed",
     ),
-    cache_dir: Optional[str] = typer.Option(
+    cache_dir: str | None = typer.Option(
         None, help="Directory for response cache (defaults to ~/.cache/llm-markdownify)"
     ),
     verbose: bool = typer.Option(
         False, "-v", "--verbose", help="Enable verbose logging (debug level)"
     ),
     quiet: bool = typer.Option(False, "-q", "--quiet", help="Suppress non-error output"),
-    version: Optional[bool] = typer.Option(
+    version: bool | None = typer.Option(
         None, "--version", callback=_version_callback, is_eager=True, help="Show version and exit"
     ),
 ) -> None:
@@ -210,7 +208,7 @@ def run(
         for err in e.errors():
             field = ".".join(str(p) for p in err["loc"]) or "input"
             typer.secho(f"Error: {field}: {err['msg']}", err=True, fg=typer.colors.RED)
-        raise typer.Exit(code=2)
+        raise typer.Exit(code=2) from None
 
     enable_console_logging(log_level)
     try:
@@ -219,12 +217,12 @@ def run(
         )
     except PageSelectionError as e:  # a bad argument, found once the page count is known
         typer.secho(f"Error: pages: {e}", err=True, fg=typer.colors.RED)
-        raise typer.Exit(code=2)
-    except Exception as e:  # show one clean line; full tracebacks only with --verbose
+        raise typer.Exit(code=2) from None
+    except Exception as e:
         if verbose:
             raise
         typer.secho(f"Error: {type(e).__name__}: {e}", err=True, fg=typer.colors.RED)
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
     text = json.dumps(result.to_dict(), indent=2) + "\n" if as_json else result.markdown
     if to_stdout:
         _write_stdout(text)

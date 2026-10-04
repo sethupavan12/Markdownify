@@ -184,13 +184,12 @@ def test_mcp_server_over_real_stdio(tmp_path: Path):
             command=sys.executable,
             args=["-m", "llm_markdownify.mcp_server", "--root", str(tmp_path)],
         )
-        async with stdio_client(params) as (read, write):
-            async with ClientSession(read, write) as session:
-                await session.initialize()
-                tools = await session.list_tools()
-                info = await session.call_tool("document_info", {"source": "a.pdf"})
-                denied = await session.call_tool("document_info", {"source": "/etc/hosts"})
-                return [t.name for t in tools.tools], info, denied
+        async with stdio_client(params) as (read, write), ClientSession(read, write) as session:
+            await session.initialize()
+            tools = await session.list_tools()
+            info = await session.call_tool("document_info", {"source": "a.pdf"})
+            denied = await session.call_tool("document_info", {"source": "/etc/hosts"})
+            return [t.name for t in tools.tools], info, denied
 
     names, info, denied = asyncio.run(run())
     assert sorted(names) == ["convert_document", "document_info"]

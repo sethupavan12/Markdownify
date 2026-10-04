@@ -1,0 +1,17 @@
+# Copyright (c) 2025 Sethu Pavan Venkata Reddy Pastula
+# Licensed under the Apache License, Version 2.0. See LICENSE file for details.
+# SPDX-License-Identifier: Apache-2.0
+
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      python-dependencies:
+        patterns: ["*"]

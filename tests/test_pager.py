@@ -4,8 +4,8 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from io import BytesIO
+from pathlib import Path
 
 import pytest
 from PIL import Image

@@ -7,10 +7,10 @@ from __future__ import annotations
 
 import argparse
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable, List
 
 HEADER_TEMPLATE = (
     "# Copyright (c) {year} {owner}\n"
@@ -34,9 +34,7 @@ def should_process(path: Path) -> bool:
         return False
     # skip files in virtualenvs or build dirs
     parts = {p.name for p in path.parents}
-    if any(x in parts for x in {".venv", "venv", "build", "dist", ".git"}):
-        return False
-    return True
+    return not any(x in parts for x in {".venv", "venv", "build", "dist", ".git"})
 
 
 def has_header(text: str, owner: str) -> bool:
@@ -64,7 +62,7 @@ def insert_header(text: str, header: str, idx: int) -> str:
     lines = text.splitlines()
     before = lines[:idx]
     after = lines[idx:]
-    out_lines: List[str] = []
+    out_lines: list[str] = []
     out_lines.extend(before)
     # ensure blank line separation when needed
     if before and before[-1] and not before[-1].endswith("\n"):
@@ -100,7 +98,7 @@ def main(argv: Iterable[str] | None = None) -> int:
 
     cfg = Config(owner=args.owner, year=args.year)
 
-    paths: List[Path]
+    paths: list[Path]
     if args.files:
         paths = [Path(p) for p in args.files]
     else:
@@ -113,8 +111,8 @@ def main(argv: Iterable[str] | None = None) -> int:
             try:
                 if process_file(p, cfg):
                     changed += 1
-            except Exception:
-                # best-effort; skip problematic files
+            except (OSError, UnicodeDecodeError):
+                # best-effort; skip unreadable or binary files
                 pass
 
     print(f"Header inserted/updated in {changed} file(s)")

@@ -12,7 +12,7 @@ import re
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Any, List, Optional
+from typing import Any
 
 from tenacity import (
     RetryCallState,
@@ -35,12 +35,9 @@ os.environ.setdefault("LITELLM_LOG_LEVEL", "ERROR")
 
 # Aggressively silence noisy third-party loggers
 for logger_name in ("LiteLLM", "litellm", "litellm.proxy", "apscheduler"):
-    try:
-        _log = logging.getLogger(logger_name)
-        _log.setLevel(logging.CRITICAL)
-        _log.propagate = False
-    except Exception:
-        pass
+    _log = logging.getLogger(logger_name)
+    _log.setLevel(logging.CRITICAL)
+    _log.propagate = False
 
 logger = get_logger("llm_markdownify.llm")
 
@@ -63,7 +60,7 @@ class RateLimiter:
     out instead of all waking at once. The bucket holds about one second of requests.
     """
 
-    def __init__(self, rpm: Optional[int] = None) -> None:
+    def __init__(self, rpm: int | None = None) -> None:
         self.rpm = rpm
         self.lock = threading.Lock()
         self.rate = (rpm / 60.0) if rpm else float("inf")
@@ -103,7 +100,7 @@ class LLMSettings:
 
     max_retries: int = 5
     retry_delay: float = 1.0
-    rate_limiter: Optional[RateLimiter] = None
+    rate_limiter: RateLimiter | None = None
     llm_kwargs: dict[str, Any] = field(default_factory=dict)
     cache: ResponseCache = field(default_factory=lambda: ResponseCache(enabled=False))
     usage: UsageCounter = field(default_factory=UsageCounter)
@@ -238,7 +235,7 @@ def _record_usage(settings: LLMSettings, resp: Any) -> None:
         settings.usage.add_response(0, 0, None)
         return
     get = usage.get if isinstance(usage, dict) else lambda k, d=None: getattr(usage, k, d)
-    cost: Optional[float]
+    cost: float | None
     try:
         import litellm  # type: ignore
 
@@ -250,7 +247,7 @@ def _record_usage(settings: LLMSettings, resp: Any) -> None:
     )
 
 
-def _message_with_images(text: str, image_data_urls: List[str]) -> dict:
+def _message_with_images(text: str, image_data_urls: list[str]) -> dict:
     """Build a message dict with text and images."""
     content: list[dict[str, Any]] = [{"type": "text", "text": text}]
     for url in image_data_urls:
@@ -315,7 +312,7 @@ def assess_continuation(
     first_data_url: str,
     second_data_url: str | None,
     profile: PromptProfile,
-    settings: Optional[LLMSettings] = None,
+    settings: LLMSettings | None = None,
 ) -> str:
     """Assess if pages should be merged (continuation detection)."""
     settings = settings or LLMSettings()
@@ -344,11 +341,11 @@ def assess_continuation(
 
 def generate_markdown(
     model: str,
-    image_data_urls: List[str],
+    image_data_urls: list[str],
     profile: PromptProfile,
     temperature: float | None = None,
     max_tokens: int | None = None,
-    settings: Optional[LLMSettings] = None,
+    settings: LLMSettings | None = None,
 ) -> str:
     """Generate markdown from page images."""
     settings = settings or LLMSettings()

@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import List, NoReturn, Optional
+from typing import NoReturn
 
 import typer
 
@@ -58,17 +58,17 @@ def _fail(e: Exception) -> NoReturn:
 
 @app.command()
 def submit(
-    inputs: List[str] = typer.Argument(..., help="PDF/image files or directories"),
+    inputs: list[str] = typer.Argument(..., help="PDF/image files or directories"),
     out: str = typer.Option(..., "-o", "--out", help="Output directory (also holds job state)"),
     model: str = typer.Option(
         "gpt-5.4-mini", help="OpenAI (gpt-5.4-mini) or Anthropic (anthropic/claude-opus-5) model"
     ),
-    profile: Optional[str] = typer.Option(None, help="Prompt profile name or JSON file"),
+    profile: str | None = typer.Option(None, help="Prompt profile name or JSON file"),
     dpi: int = typer.Option(200, help="PDF render DPI"),
     max_image_px: int = typer.Option(2048, help="Longest side of each page image"),
     max_tokens: int = typer.Option(16000, help="Max output tokens per page"),
-    reasoning_effort: Optional[str] = typer.Option(None, help="e.g. none, low, medium, high"),
-    api_base: Optional[str] = typer.Option(None, help="Custom base URL for the provider API"),
+    reasoning_effort: str | None = typer.Option(None, help="e.g. none, low, medium, high"),
+    api_base: str | None = typer.Option(None, help="Custom base URL for the provider API"),
     wait: bool = typer.Option(False, "--wait", help="Block until done and write the Markdown"),
     quiet: bool = typer.Option(False, "-q", "--quiet"),
 ) -> None:
@@ -91,7 +91,7 @@ def submit(
         else:
             typer.echo(f"Submitted. Check with: markdownify-batch status {out}")
             return
-    except Exception as e:  # one clean line, never a traceback with locals
+    except Exception as e:  # noqa: BLE001 - one clean line, never a traceback with locals
         _fail(e)
     _report(result)
     _exit_for(result)
@@ -103,7 +103,7 @@ def status(out: str = typer.Argument(..., help="Output directory of a submitted 
     enable_console_logging("normal")
     try:
         st = batch_api.batch_status(out)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - reported as one clean line
         _fail(e)
     for b in st.batches:
         typer.echo(
@@ -124,7 +124,7 @@ def collect(
     enable_console_logging("normal")
     try:
         result = batch_api.collect_batch(out, retry_failed=retry_failed)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - reported as one clean line
         _fail(e)
     _report(result)
     _exit_for(result)
@@ -142,7 +142,7 @@ def wait_cmd(
         result = batch_api.wait_batch(
             Path(out), poll_seconds=poll_seconds, retry_failed=retry_failed
         )
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - reported as one clean line
         _fail(e)
     _report(result)
     _exit_for(result)
