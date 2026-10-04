@@ -14,7 +14,7 @@ __all__ = [
     "Markdownifier",
 ]
 
-__version__ = "0.6.0"
+__version__ = "1.0.0"
 
 from .api import amarkdownify, convert, markdownify
 from .config import MarkdownifyConfig
